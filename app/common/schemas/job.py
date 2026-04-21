@@ -20,6 +20,8 @@ class JobStatusResponse(BaseModel):
     id: UUID
     input_value: str
     status: JobStatus
+    attempt_count: int
+    maximum_attempt_count: int
     result: str | None
     error_message: str | None
     created_at: datetime

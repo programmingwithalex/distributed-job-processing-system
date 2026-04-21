@@ -86,6 +86,8 @@ Example response:
   "id": "6f98c765-4070-4d44-a576-5ee0f7f9af84",
   "input_value": "hello-world",
   "status": "queued",
+  "attempt_count": 0,
+  "maximum_attempt_count": 3,
   "result": null,
   "error_message": null,
   "created_at": "2026-04-19T00:00:00.000000Z",
@@ -100,6 +102,11 @@ curl http://localhost:8000/jobs/<job-id>
 ```
 
 The job status flows through `queued`, `processing`, and `completed`, or `failed` if the worker raises an exception.
+
+Retry behavior is deterministic for local verification:
+
+- use `fail-once:<value>` to trigger one transient failure before the retry succeeds
+- use `always-fail:<value>` to force terminal failure after the retry budget is exhausted
 
 ## Reproducible seed data
 

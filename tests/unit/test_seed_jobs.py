@@ -20,6 +20,18 @@ def test_build_seed_job_definitions_returns_stable_dataset() -> None:
         JobStatus.COMPLETED,
         JobStatus.FAILED,
     ]
+    assert [seeded_job_definition.attempt_count for seeded_job_definition in seeded_job_definitions] == [
+        0,
+        1,
+        1,
+        3,
+    ]
+    assert [seeded_job_definition.maximum_attempt_count for seeded_job_definition in seeded_job_definitions] == [
+        3,
+        3,
+        3,
+        3,
+    ]
     assert [str(seeded_job_definition.id) for seeded_job_definition in seeded_job_definitions] == [
         "5769240a-b71f-5d22-b672-eb1ae8b330a2",
         "e1d33224-4954-5dc0-ac23-15a7dcd0e7dc",
