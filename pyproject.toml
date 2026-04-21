@@ -1,0 +1,43 @@
+[project]
+name = "distributed-job-processing-system"
+version = "0.1.0"
+description = "Minimal distributed job processing system with FastAPI, Celery, RabbitMQ, and Postgres."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "alembic>=1.16.0,<2.0.0",
+    "celery>=5.4.0,<6.0.0",
+    "fastapi>=0.115.0,<1.0.0",
+    "psycopg[binary]>=3.2.0,<4.0.0",
+    "pydantic-settings>=2.8.0,<3.0.0",
+    "sqlalchemy>=2.0.38,<3.0.0",
+    "uvicorn[standard]>=0.34.0,<1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx>=0.28.0,<1.0.0",
+    "pytest>=8.3.0,<9.0.0",
+    "ruff>=0.11.0,<1.0.0",
+]
+
+[project.scripts]
+seed-dummy-jobs = "app.common.seed_jobs:main"
+
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.uv]
+default-groups = []
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
