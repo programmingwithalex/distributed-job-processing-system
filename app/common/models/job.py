@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, String, Text, func
+from sqlalchemy import DateTime, Enum, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,6 +34,8 @@ class JobRecord(ORMBase):
         nullable=False,
         default=JobStatus.QUEUED,
     )
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    maximum_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
