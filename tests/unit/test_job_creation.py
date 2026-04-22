@@ -1,3 +1,4 @@
+from app.common.models.job import JobType
 from app.common.schemas.job import JobCreateRequest
 from app.common.services.jobs import create_job_record, resolve_job_maximum_attempt_count
 
@@ -35,10 +36,11 @@ class FakeDatabaseSession:
 def test_job_create_request_accepts_custom_retry_budget() -> None:
     """Verify the request schema accepts a per-job retry override."""
     job_create_request = JobCreateRequest.model_validate(
-        {"input_value": "always-fail:demo", "maximum_attempt_count": 5}
+        {"input_value": "always-fail:demo", "job_type": "reverse", "maximum_attempt_count": 5}
     )
 
     assert job_create_request.input_value == "always-fail:demo"
+    assert job_create_request.job_type == JobType.REVERSE
     assert job_create_request.maximum_attempt_count == 5
 
 
@@ -54,9 +56,11 @@ def test_create_job_record_persists_custom_retry_budget() -> None:
     job_record = create_job_record(
         database_session=fake_database_session,
         input_value="always-fail:demo",
+        job_type=JobType.UPPERCASE,
         maximum_attempt_count=5,
     )
 
+    assert job_record.job_type == JobType.UPPERCASE
     assert job_record.maximum_attempt_count == 5
     assert job_record.attempt_count == 0
     assert fake_database_session.commit_call_count == 1

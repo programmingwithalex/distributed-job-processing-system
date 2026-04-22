@@ -18,6 +18,14 @@ class JobStatus(str, enum.Enum):
     FAILED = "failed"
 
 
+class JobType(str, enum.Enum):
+    """Enumerate the supported processing behaviors for submitted jobs."""
+
+    ECHO = "echo"
+    REVERSE = "reverse"
+    UPPERCASE = "uppercase"
+
+
 class JobRecord(ORMBase):
     """Persist the system-of-record view of a submitted job."""
 
@@ -25,6 +33,15 @@ class JobRecord(ORMBase):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     input_value: Mapped[str] = mapped_column(String(255), nullable=False)
+    job_type: Mapped[JobType] = mapped_column(
+        Enum(
+            JobType,
+            name="job_type",
+            values_callable=lambda job_type_enum: [job_type_member.value for job_type_member in job_type_enum],
+        ),
+        nullable=False,
+        default=JobType.ECHO,
+    )
     status: Mapped[JobStatus] = mapped_column(
         Enum(
             JobStatus,
