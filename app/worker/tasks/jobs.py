@@ -1,8 +1,10 @@
+import logging
 import time
 from uuid import UUID
 
 from app.common.models.job import JobStatus
 from app.common.database import database_session_factory
+from app.common.logging import correlation_identifier_context_scope
 from app.common.services.jobs import (
     mark_job_record_completed,
     mark_job_record_processing,
@@ -13,6 +15,7 @@ from app.worker.celery_app import celery_app
 
 TRANSIENT_FAILURE_INPUT_PREFIX = "fail-once:"
 PERSISTENT_FAILURE_INPUT_PREFIX = "always-fail:"
+logger = logging.getLogger(__name__)
 
 
 def build_processed_result(input_value: str, attempt_count: int) -> str:
@@ -33,33 +36,50 @@ def process_submitted_job(job_id: str) -> None:
     """Process a submitted job by updating its persisted lifecycle state."""
     database_session = database_session_factory()
     parsed_job_id = UUID(job_id)
-    try:
-        job_record = mark_job_record_processing(
-            database_session=database_session,
-            job_id=parsed_job_id,
-        )
-        if job_record is None:
-            return
+    correlation_identifier = f"job:{job_id}"
+    with correlation_identifier_context_scope(correlation_identifier=correlation_identifier):
+        try:
+            job_record = mark_job_record_processing(
+                database_session=database_session,
+                job_id=parsed_job_id,
+            )
+            if job_record is None:
+                logger.warning("Skipped processing because job %s was not found", job_id)
+                return
 
-        processed_result = build_processed_result(
-            input_value=job_record.input_value,
-            attempt_count=job_record.attempt_count,
-        )
-        mark_job_record_completed(
-            database_session=database_session,
-            job_id=parsed_job_id,
-            processed_result=processed_result,
-        )
-    except RuntimeError as processing_error:
-        updated_job_record = mark_job_record_queued_for_retry_or_failed(
-            database_session=database_session,
-            job_id=parsed_job_id,
-            failure_message=str(processing_error),
-        )
-        if updated_job_record is not None and updated_job_record.status == JobStatus.QUEUED:
-            process_submitted_job.delay(job_id)
-            return
+            logger.info(
+                "Processing job %s attempt %s of %s",
+                job_record.id,
+                job_record.attempt_count,
+                job_record.maximum_attempt_count,
+            )
+            processed_result = build_processed_result(
+                input_value=job_record.input_value,
+                attempt_count=job_record.attempt_count,
+            )
+            mark_job_record_completed(
+                database_session=database_session,
+                job_id=parsed_job_id,
+                processed_result=processed_result,
+            )
+            logger.info("Completed job %s", job_record.id)
+        except RuntimeError as processing_error:
+            updated_job_record = mark_job_record_queued_for_retry_or_failed(
+                database_session=database_session,
+                job_id=parsed_job_id,
+                failure_message=str(processing_error),
+            )
+            if updated_job_record is not None and updated_job_record.status == JobStatus.QUEUED:
+                logger.warning(
+                    "Retrying job %s after attempt %s of %s failed",
+                    updated_job_record.id,
+                    updated_job_record.attempt_count,
+                    updated_job_record.maximum_attempt_count,
+                )
+                process_submitted_job.delay(job_id)
+                return
 
-        raise
-    finally:
-        database_session.close()
+            logger.error("Job %s failed permanently", job_id)
+            raise
+        finally:
+            database_session.close()

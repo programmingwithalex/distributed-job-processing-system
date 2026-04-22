@@ -120,6 +120,11 @@ Retry behavior is deterministic for local verification:
 - use `fail-once:<value>` to trigger one transient failure before the retry succeeds
 - use `always-fail:<value>` to force terminal failure after the retry budget is exhausted
 
+API and worker logs now include a correlation identifier:
+
+- API requests use `X-Request-ID` if provided, or generate one automatically
+- worker logs use `job:<job-id>` so a single job can be traced across retry attempts
+
 ## Reproducible seed data
 
 Use the seed command to populate the `jobs` table with the same deterministic demo rows every time.

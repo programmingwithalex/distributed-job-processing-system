@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -10,6 +11,7 @@ from app.common.services.jobs import create_job_record, get_job_record_by_id, li
 from app.worker.tasks.jobs import process_submitted_job
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=JobStatusResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -23,6 +25,7 @@ def submit_job(
         input_value=job_create_request.input_value,
     )
     process_submitted_job.delay(str(job_record.id))
+    logger.info("Submitted job %s with input %s", job_record.id, job_record.input_value)
     return JobStatusResponse.model_validate(job_record)
 
 
@@ -34,8 +37,10 @@ def get_job_status_by_id(
     """Return the current persisted status for a previously submitted job."""
     job_record = get_job_record_by_id(database_session=database_session, job_id=job_id)
     if job_record is None:
+        logger.warning("Job %s was not found during status lookup", job_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
 
+    logger.info("Fetched job %s with status %s", job_record.id, job_record.status.value)
     return JobStatusResponse.model_validate(job_record)
 
 
@@ -52,5 +57,12 @@ def list_jobs(
         status_filter=status_filter,
         limit=limit,
         offset=offset,
+    )
+    logger.info(
+        "Listed %s jobs with status_filter=%s limit=%s offset=%s",
+        len(job_records),
+        status_filter.value if status_filter is not None else "all",
+        limit,
+        offset,
     )
     return [JobStatusResponse.model_validate(job_record) for job_record in job_records]
