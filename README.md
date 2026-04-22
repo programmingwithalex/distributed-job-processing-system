@@ -101,6 +101,18 @@ Fetch job status:
 curl http://localhost:8000/jobs/<job-id>
 ```
 
+List jobs:
+
+```bash
+curl "http://localhost:8000/jobs?limit=10&offset=0"
+```
+
+List failed jobs only:
+
+```bash
+curl "http://localhost:8000/jobs?status=failed&limit=10&offset=0"
+```
+
 The job status flows through `queued`, `processing`, and `completed`, or `failed` if the worker raises an exception.
 
 Retry behavior is deterministic for local verification:
