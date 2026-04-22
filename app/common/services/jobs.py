@@ -4,7 +4,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from app.common.config import get_application_settings
-from app.common.models.job import JobRecord, JobStatus
+from app.common.models.job import JobRecord, JobStatus, JobType
 
 
 application_settings = get_application_settings()
@@ -28,11 +28,13 @@ def resolve_job_maximum_attempt_count(maximum_attempt_count: int | None) -> int:
 def create_job_record(
     database_session: Session,
     input_value: str,
+    job_type: JobType,
     maximum_attempt_count: int | None = None,
 ) -> JobRecord:
     """Persist a new queued job record and return the stored row."""
     job_record = JobRecord(
         input_value=input_value,
+        job_type=job_type,
         status=JobStatus.QUEUED,
         attempt_count=0,
         maximum_attempt_count=resolve_job_maximum_attempt_count(maximum_attempt_count=maximum_attempt_count),

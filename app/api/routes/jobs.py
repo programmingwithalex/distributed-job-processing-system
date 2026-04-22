@@ -23,10 +23,16 @@ def submit_job(
     job_record = create_job_record(
         database_session=database_session,
         input_value=job_create_request.input_value,
+        job_type=job_create_request.job_type,
         maximum_attempt_count=job_create_request.maximum_attempt_count,
     )
     process_submitted_job.delay(str(job_record.id))
-    logger.info("Submitted job %s with input %s", job_record.id, job_record.input_value)
+    logger.info(
+        "Submitted job %s with type %s and input %s",
+        job_record.id,
+        job_record.job_type.value,
+        job_record.input_value,
+    )
     return JobStatusResponse.model_validate(job_record)
 
 

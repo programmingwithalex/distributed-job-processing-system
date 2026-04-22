@@ -76,7 +76,7 @@ Submit a job:
 ```bash
 curl -X POST http://localhost:8000/jobs \
   -H "Content-Type: application/json" \
-  -d '{"input_value":"hello-world"}'
+  -d '{"input_value":"hello-world","job_type":"echo"}'
 ```
 
 Submit a job with a custom retry budget:
@@ -84,7 +84,7 @@ Submit a job with a custom retry budget:
 ```bash
 curl -X POST http://localhost:8000/jobs \
   -H "Content-Type: application/json" \
-  -d '{"input_value":"always-fail:demo","maximum_attempt_count":5}'
+  -d '{"input_value":"always-fail:demo","job_type":"uppercase","maximum_attempt_count":5}'
 ```
 
 Example response:
@@ -93,6 +93,7 @@ Example response:
 {
   "id": "6f98c765-4070-4d44-a576-5ee0f7f9af84",
   "input_value": "hello-world",
+  "job_type": "echo",
   "status": "queued",
   "attempt_count": 0,
   "maximum_attempt_count": 3,
@@ -127,6 +128,12 @@ Retry behavior is deterministic for local verification:
 
 - use `fail-once:<value>` to trigger one transient failure before the retry succeeds
 - use `always-fail:<value>` to force terminal failure after the retry budget is exhausted
+
+Supported job types:
+
+- `echo` returns the input unchanged
+- `reverse` reverses the input text before persisting the result
+- `uppercase` uppercases the input text before persisting the result
 
 API and worker logs now include a correlation identifier:
 

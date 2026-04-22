@@ -2,7 +2,7 @@ import logging
 import time
 from uuid import UUID
 
-from app.common.models.job import JobStatus
+from app.common.models.job import JobStatus, JobType
 from app.common.database import database_session_factory
 from app.common.logging import correlation_identifier_context_scope
 from app.common.services.jobs import (
@@ -18,7 +18,21 @@ PERSISTENT_FAILURE_INPUT_PREFIX = "always-fail:"
 logger = logging.getLogger(__name__)
 
 
-def build_processed_result(input_value: str, attempt_count: int) -> str:
+def transform_job_input(input_value: str, job_type: JobType) -> str:
+    """Transform the submitted input according to the requested job type."""
+    if job_type == JobType.ECHO:
+        return input_value
+
+    if job_type == JobType.REVERSE:
+        return input_value[::-1]
+
+    if job_type == JobType.UPPERCASE:
+        return input_value.upper()
+
+    raise RuntimeError(f"Unsupported job type: {job_type.value}")
+
+
+def build_processed_result(input_value: str, job_type: JobType, attempt_count: int) -> str:
     """Build the processed result or raise a controlled failure for retry verification."""
     time.sleep(2)
 
@@ -28,7 +42,8 @@ def build_processed_result(input_value: str, attempt_count: int) -> str:
     if input_value.startswith(TRANSIENT_FAILURE_INPUT_PREFIX) and attempt_count == 1:
         raise RuntimeError("simulated transient job processing failure")
 
-    return f"processed:{input_value}"
+    transformed_input_value = transform_job_input(input_value=input_value, job_type=job_type)
+    return f"processed:{transformed_input_value}"
 
 
 @celery_app.task(name="app.worker.tasks.jobs.process_submitted_job")
@@ -48,13 +63,15 @@ def process_submitted_job(job_id: str) -> None:
                 return
 
             logger.info(
-                "Processing job %s attempt %s of %s",
+                "Processing job %s type %s attempt %s of %s",
                 job_record.id,
+                job_record.job_type.value,
                 job_record.attempt_count,
                 job_record.maximum_attempt_count,
             )
             processed_result = build_processed_result(
                 input_value=job_record.input_value,
+                job_type=job_record.job_type,
                 attempt_count=job_record.attempt_count,
             )
             mark_job_record_completed(
