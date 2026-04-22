@@ -76,7 +76,15 @@ Submit a job:
 ```bash
 curl -X POST http://localhost:8000/jobs \
   -H "Content-Type: application/json" \
-  -d '{"input_value":"hello-world"}'
+  -d '{"input_value":"hello-world","job_type":"echo"}'
+```
+
+Submit a job with a custom retry budget:
+
+```bash
+curl -X POST http://localhost:8000/jobs \
+  -H "Content-Type: application/json" \
+  -d '{"input_value":"always-fail:demo","job_type":"uppercase","maximum_attempt_count":5}'
 ```
 
 Example response:
@@ -85,7 +93,10 @@ Example response:
 {
   "id": "6f98c765-4070-4d44-a576-5ee0f7f9af84",
   "input_value": "hello-world",
+  "job_type": "echo",
   "status": "queued",
+  "attempt_count": 0,
+  "maximum_attempt_count": 3,
   "result": null,
   "error_message": null,
   "created_at": "2026-04-19T00:00:00.000000Z",
@@ -99,7 +110,35 @@ Fetch job status:
 curl http://localhost:8000/jobs/<job-id>
 ```
 
+List jobs:
+
+```bash
+curl "http://localhost:8000/jobs?limit=10&offset=0"
+```
+
+List failed jobs only:
+
+```bash
+curl "http://localhost:8000/jobs?status=failed&limit=10&offset=0"
+```
+
 The job status flows through `queued`, `processing`, and `completed`, or `failed` if the worker raises an exception.
+
+Retry behavior is deterministic for local verification:
+
+- use `fail-once:<value>` to trigger one transient failure before the retry succeeds
+- use `always-fail:<value>` to force terminal failure after the retry budget is exhausted
+
+Supported job types:
+
+- `echo` returns the input unchanged
+- `reverse` reverses the input text before persisting the result
+- `uppercase` uppercases the input text before persisting the result
+
+API and worker logs now include a correlation identifier:
+
+- API requests use `X-Request-ID` if provided, or generate one automatically
+- worker logs use `job:<job-id>` so a single job can be traced across retry attempts
 
 ## Reproducible seed data
 

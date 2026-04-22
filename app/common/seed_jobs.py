@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.common.database import database_session_factory
-from app.common.models.job import JobRecord, JobStatus
+from app.common.models.job import JobRecord, JobStatus, JobType
 
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,10 @@ class SeedJobDefinition:
 
     id: uuid.UUID
     input_value: str
+    job_type: JobType
     status: JobStatus
+    attempt_count: int
+    maximum_attempt_count: int
     result: str | None
     error_message: str | None
     created_at: datetime
@@ -65,7 +68,10 @@ def build_seed_job_definitions() -> tuple[SeedJobDefinition, ...]:
         SeedJobDefinition(
             id=build_seeded_job_identifier("queued-portfolio-import"),
             input_value="portfolio-import",
+            job_type=JobType.ECHO,
             status=JobStatus.QUEUED,
+            attempt_count=0,
+            maximum_attempt_count=3,
             result=None,
             error_message=None,
             created_at=build_seeded_timestamp(0),
@@ -74,7 +80,10 @@ def build_seed_job_definitions() -> tuple[SeedJobDefinition, ...]:
         SeedJobDefinition(
             id=build_seeded_job_identifier("processing-position-reconciliation"),
             input_value="position-reconciliation",
+            job_type=JobType.REVERSE,
             status=JobStatus.PROCESSING,
+            attempt_count=1,
+            maximum_attempt_count=3,
             result=None,
             error_message=None,
             created_at=build_seeded_timestamp(5),
@@ -83,8 +92,11 @@ def build_seed_job_definitions() -> tuple[SeedJobDefinition, ...]:
         SeedJobDefinition(
             id=build_seeded_job_identifier("completed-nav-calculation"),
             input_value="nav-calculation",
+            job_type=JobType.UPPERCASE,
             status=JobStatus.COMPLETED,
-            result="processed:nav-calculation",
+            attempt_count=1,
+            maximum_attempt_count=3,
+            result="processed:NAV-CALCULATION",
             error_message=None,
             created_at=build_seeded_timestamp(14),
             updated_at=build_seeded_timestamp(19),
@@ -92,7 +104,10 @@ def build_seed_job_definitions() -> tuple[SeedJobDefinition, ...]:
         SeedJobDefinition(
             id=build_seeded_job_identifier("failed-report-publication"),
             input_value="report-publication",
+            job_type=JobType.ECHO,
             status=JobStatus.FAILED,
+            attempt_count=3,
+            maximum_attempt_count=3,
             result=None,
             error_message="simulated downstream publication failure",
             created_at=build_seeded_timestamp(21),
@@ -130,7 +145,10 @@ def seed_job_records(
                 JobRecord(
                     id=seeded_job_definition.id,
                     input_value=seeded_job_definition.input_value,
+                    job_type=seeded_job_definition.job_type,
                     status=seeded_job_definition.status,
+                    attempt_count=seeded_job_definition.attempt_count,
+                    maximum_attempt_count=seeded_job_definition.maximum_attempt_count,
                     result=seeded_job_definition.result,
                     error_message=seeded_job_definition.error_message,
                     created_at=seeded_job_definition.created_at,

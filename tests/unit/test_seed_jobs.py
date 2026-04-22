@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from app.common.models.job import JobStatus
+from app.common.models.job import JobStatus, JobType
 from app.common.seed_jobs import build_seed_job_definitions
 
 
@@ -20,6 +20,24 @@ def test_build_seed_job_definitions_returns_stable_dataset() -> None:
         JobStatus.COMPLETED,
         JobStatus.FAILED,
     ]
+    assert [seeded_job_definition.job_type for seeded_job_definition in seeded_job_definitions] == [
+        JobType.ECHO,
+        JobType.REVERSE,
+        JobType.UPPERCASE,
+        JobType.ECHO,
+    ]
+    assert [seeded_job_definition.attempt_count for seeded_job_definition in seeded_job_definitions] == [
+        0,
+        1,
+        1,
+        3,
+    ]
+    assert [seeded_job_definition.maximum_attempt_count for seeded_job_definition in seeded_job_definitions] == [
+        3,
+        3,
+        3,
+        3,
+    ]
     assert [str(seeded_job_definition.id) for seeded_job_definition in seeded_job_definitions] == [
         "5769240a-b71f-5d22-b672-eb1ae8b330a2",
         "e1d33224-4954-5dc0-ac23-15a7dcd0e7dc",
@@ -31,4 +49,10 @@ def test_build_seed_job_definitions_returns_stable_dataset() -> None:
         datetime(2026, 4, 20, 12, 5, tzinfo=UTC),
         datetime(2026, 4, 20, 12, 14, tzinfo=UTC),
         datetime(2026, 4, 20, 12, 21, tzinfo=UTC),
+    ]
+    assert [seeded_job_definition.result for seeded_job_definition in seeded_job_definitions] == [
+        None,
+        None,
+        "processed:NAV-CALCULATION",
+        None,
     ]

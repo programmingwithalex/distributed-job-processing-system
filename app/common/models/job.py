@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, String, Text, func
+from sqlalchemy import DateTime, Enum, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +18,14 @@ class JobStatus(str, enum.Enum):
     FAILED = "failed"
 
 
+class JobType(str, enum.Enum):
+    """Enumerate the supported processing behaviors for submitted jobs."""
+
+    ECHO = "echo"
+    REVERSE = "reverse"
+    UPPERCASE = "uppercase"
+
+
 class JobRecord(ORMBase):
     """Persist the system-of-record view of a submitted job."""
 
@@ -25,6 +33,15 @@ class JobRecord(ORMBase):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     input_value: Mapped[str] = mapped_column(String(255), nullable=False)
+    job_type: Mapped[JobType] = mapped_column(
+        Enum(
+            JobType,
+            name="job_type",
+            values_callable=lambda job_type_enum: [job_type_member.value for job_type_member in job_type_enum],
+        ),
+        nullable=False,
+        default=JobType.ECHO,
+    )
     status: Mapped[JobStatus] = mapped_column(
         Enum(
             JobStatus,
@@ -34,6 +51,8 @@ class JobRecord(ORMBase):
         nullable=False,
         default=JobStatus.QUEUED,
     )
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    maximum_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
