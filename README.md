@@ -79,6 +79,14 @@ curl -X POST http://localhost:8000/jobs \
   -d '{"input_value":"hello-world"}'
 ```
 
+Submit a job with a custom retry budget:
+
+```bash
+curl -X POST http://localhost:8000/jobs \
+  -H "Content-Type: application/json" \
+  -d '{"input_value":"always-fail:demo","maximum_attempt_count":5}'
+```
+
 Example response:
 
 ```json
