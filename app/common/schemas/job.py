@@ -10,6 +10,7 @@ class JobCreateRequest(BaseModel):
     """Define the API request body for submitting a new job."""
 
     input_value: str = Field(min_length=1, max_length=255)
+    maximum_attempt_count: int | None = Field(default=None, ge=1, le=10)
 
 
 class JobStatusResponse(BaseModel):

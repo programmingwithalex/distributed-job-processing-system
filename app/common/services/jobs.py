@@ -10,13 +10,32 @@ from app.common.models.job import JobRecord, JobStatus
 application_settings = get_application_settings()
 
 
-def create_job_record(database_session: Session, input_value: str) -> JobRecord:
+def resolve_job_maximum_attempt_count(maximum_attempt_count: int | None) -> int:
+    """Resolve the effective retry budget for a newly created job.
+
+    Args:
+        maximum_attempt_count: Optional per-job retry limit override
+
+    Returns:
+        Effective retry budget for the new job record
+    """
+    if maximum_attempt_count is not None:
+        return maximum_attempt_count
+
+    return application_settings.default_maximum_attempt_count
+
+
+def create_job_record(
+    database_session: Session,
+    input_value: str,
+    maximum_attempt_count: int | None = None,
+) -> JobRecord:
     """Persist a new queued job record and return the stored row."""
     job_record = JobRecord(
         input_value=input_value,
         status=JobStatus.QUEUED,
         attempt_count=0,
-        maximum_attempt_count=application_settings.default_maximum_attempt_count,
+        maximum_attempt_count=resolve_job_maximum_attempt_count(maximum_attempt_count=maximum_attempt_count),
     )
     database_session.add(job_record)
     database_session.commit()
