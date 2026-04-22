@@ -12,6 +12,7 @@ class ApplicationSettings(BaseSettings):
     api_port: int = 8000
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/jobs"
     celery_broker_url: str = "amqp://guest:guest@localhost:5672//"
+    default_maximum_attempt_count: int = 3
 
     model_config = SettingsConfigDict(
         env_file=".env",

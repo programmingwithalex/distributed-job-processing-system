@@ -9,6 +9,7 @@ services:
       API_HOST: 0.0.0.0
       API_PORT: 8000
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/jobs
+      DEFAULT_MAXIMUM_ATTEMPT_COUNT: 3
       CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
     depends_on:
       postgres:
@@ -26,6 +27,7 @@ services:
       APP_ENV: local
       LOG_LEVEL: INFO
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/jobs
+      DEFAULT_MAXIMUM_ATTEMPT_COUNT: 3
       CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
     depends_on:
       postgres:
