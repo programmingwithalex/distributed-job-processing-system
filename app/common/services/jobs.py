@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from app.common.config import get_application_settings
@@ -28,6 +28,57 @@ def get_job_record_by_id(database_session: Session, job_id: UUID) -> JobRecord |
     """Fetch a job record by its identifier from Postgres."""
     job_lookup_statement = select(JobRecord).where(JobRecord.id == job_id)
     return database_session.execute(job_lookup_statement).scalar_one_or_none()
+
+
+def build_job_record_listing_statement(
+    status_filter: JobStatus | None,
+    limit: int,
+    offset: int,
+) -> Select[tuple[JobRecord]]:
+    """Build the query used to list persisted job records.
+
+    Args:
+        status_filter: Optional job status used to narrow the result set
+        limit: Maximum number of job records to return
+        offset: Number of rows to skip before returning records
+
+    Returns:
+        SQLAlchemy select statement for listing jobs newest first
+    """
+    job_record_listing_statement = select(JobRecord).order_by(
+        JobRecord.created_at.desc(),
+        JobRecord.id.desc(),
+    )
+
+    if status_filter is not None:
+        job_record_listing_statement = job_record_listing_statement.where(JobRecord.status == status_filter)
+
+    return job_record_listing_statement.limit(limit).offset(offset)
+
+
+def list_job_records(
+    database_session: Session,
+    status_filter: JobStatus | None,
+    limit: int,
+    offset: int,
+) -> list[JobRecord]:
+    """List persisted job records with optional filtering and pagination.
+
+    Args:
+        database_session: SQLAlchemy session used for persistence work
+        status_filter: Optional job status used to narrow the result set
+        limit: Maximum number of job records to return
+        offset: Number of rows to skip before returning records
+
+    Returns:
+        Ordered list of matching job records
+    """
+    job_record_listing_statement = build_job_record_listing_statement(
+        status_filter=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+    return list(database_session.execute(job_record_listing_statement).scalars().all())
 
 
 def mark_job_record_processing(database_session: Session, job_id: UUID) -> JobRecord | None:

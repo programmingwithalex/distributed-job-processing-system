@@ -1,11 +1,12 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.common.database import get_database_session
+from app.common.models.job import JobStatus
 from app.common.schemas.job import JobCreateRequest, JobStatusResponse
-from app.common.services.jobs import create_job_record, get_job_record_by_id
+from app.common.services.jobs import create_job_record, get_job_record_by_id, list_job_records
 from app.worker.tasks.jobs import process_submitted_job
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -36,3 +37,20 @@ def get_job_status_by_id(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
 
     return JobStatusResponse.model_validate(job_record)
+
+
+@router.get("", response_model=list[JobStatusResponse])
+def list_jobs(
+    status_filter: JobStatus | None = Query(default=None, alias="status"),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    database_session: Session = Depends(get_database_session),
+) -> list[JobStatusResponse]:
+    """List persisted jobs with optional status filtering and pagination."""
+    job_records = list_job_records(
+        database_session=database_session,
+        status_filter=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+    return [JobStatusResponse.model_validate(job_record) for job_record in job_records]
