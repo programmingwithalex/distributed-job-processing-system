@@ -1,5 +1,21 @@
 services:
+  frontend:
+    # run the react dashboard in a containerized vite dev server for local development
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.frontend
+    environment:
+      # route frontend api calls to the fastapi service over the compose network
+      API_PROXY_TARGET: http://api:8000
+    depends_on:
+      api:
+        # wait until the api container has started before launching the frontend
+        condition: service_started
+    ports:
+      - "5173:5173"
+
   api:
+    # serve the fastapi application and run migrations on startup
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.api
@@ -13,13 +29,16 @@ services:
       CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
     depends_on:
       postgres:
+        # block api startup until postgres accepts connections
         condition: service_healthy
       rabbitmq:
+        # block api startup until the broker is reachable
         condition: service_healthy
     ports:
       - "8000:8000"
 
-  worker:
+  celery_worker:
+    # process queued jobs using the same shared application code as the api
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.worker
@@ -31,11 +50,14 @@ services:
       CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
     depends_on:
       postgres:
+        # worker needs the database before it can persist job state changes
         condition: service_healthy
       rabbitmq:
+        # worker needs the broker before it can consume tasks
         condition: service_healthy
 
   rabbitmq:
+    # broker for celery task delivery
     image: rabbitmq:3.13-management
     ports:
       - "5672:5672"
@@ -47,6 +69,7 @@ services:
       retries: 10
 
   postgres:
+    # system of record for job state and metadata
     image: postgres:16
     environment:
       POSTGRES_DB: jobs
@@ -62,5 +85,5 @@ services:
       timeout: 5s
       retries: 10
 
-volumes:  # preserver across container restarts
+volumes:  # preserve across container restarts
   postgres_data:
