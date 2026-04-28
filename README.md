@@ -18,6 +18,7 @@ tests/
 ## Prerequisites
 
 - uv
+- pnpm
 - Docker Desktop or Docker Engine with Compose
 
 ## Run with Docker Compose
@@ -28,7 +29,7 @@ From the repository root:
 docker compose up --build
 ```
 
-The API will be available at <http://localhost:8000>.
+The frontend will be available at <http://localhost:5173> and the API will be available at <http://localhost:8000>.
 
 ## Run locally with uv
 
@@ -62,6 +63,47 @@ Start the worker:
 ```bash
 uv run celery -A app.worker.celery_app:celery_app worker --loglevel=info
 ```
+
+## Run the React frontend
+
+The repository includes a small React + TypeScript dashboard under `frontend/`.
+
+Install frontend dependencies:
+
+```bash
+cd frontend
+pnpm install
+```
+
+Start the frontend dev server:
+
+```bash
+pnpm dev
+```
+
+The frontend runs on <http://localhost:5173> and proxies API requests to the FastAPI server on <http://localhost:8000> during local development.
+
+The Docker Compose frontend service uses the same dashboard and proxies API traffic to the `api` container automatically.
+
+Build the frontend:
+
+```bash
+pnpm build
+```
+
+Run Playwright end-to-end tests against the local stack:
+
+```bash
+pnpm test:e2e
+```
+
+The Playwright tests assume the frontend is available at <http://localhost:5173> and the API is available at <http://localhost:8000>.
+
+The dashboard includes:
+
+- a job submission form for `input_value`, `job_type`, and optional retry budget
+- a selected-job panel that auto-refreshes until the job reaches `completed` or `failed`
+- a recent-jobs list with status filtering and row selection
 
 ## API usage
 
@@ -135,7 +177,7 @@ Supported job types:
 - `reverse` reverses the input text before persisting the result
 - `uppercase` uppercases the input text before persisting the result
 
-API and worker logs now include a correlation identifier:
+API and worker logs include a correlation identifier:
 
 - API requests use `X-Request-ID` if provided, or generate one automatically
 - worker logs use `job:<job-id>` so a single job can be traced across retry attempts

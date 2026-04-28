@@ -1,0 +1,15 @@
+# exclude git metadata and local ignore rules from image build context
+.git
+.gitignore
+
+# exclude local python caches and virtualenv artifacts
+.pytest_cache
+.venv
+__pycache__
+*.pyc
+
+# exclude host-installed frontend dependencies and build output
+# the container installs its own linux-compatible dependencies
+frontend/node_modules
+frontend/dist
+node_modules
