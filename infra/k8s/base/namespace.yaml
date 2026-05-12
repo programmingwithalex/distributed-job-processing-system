@@ -1,0 +1,5 @@
+# dedicated namespace so the app resources stay grouped together
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: distributed-job-processing-system

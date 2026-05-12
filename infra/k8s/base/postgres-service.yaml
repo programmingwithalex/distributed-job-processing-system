@@ -1,0 +1,15 @@
+# stable in-cluster network name for postgres
+apiVersion: v1
+kind: Service
+metadata:
+  # service object name inside kubernetes
+  name: postgres
+spec:
+  selector:
+    # select pods labeled as the postgres workload
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      # forward traffic to port 5432 on the matched postgres pods
+      targetPort: 5432

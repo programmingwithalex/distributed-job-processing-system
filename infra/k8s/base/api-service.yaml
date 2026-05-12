@@ -1,0 +1,15 @@
+# stable service name that other pods and port-forwarding can target
+apiVersion: v1
+kind: Service
+metadata:
+  # service object name inside kubernetes
+  name: api
+spec:
+  selector:
+    # select pods labeled as the api workload
+    app: api
+  ports:
+    - name: http
+      port: 8000
+      # forward traffic to port 8000 on the matched api pods
+      targetPort: 8000
