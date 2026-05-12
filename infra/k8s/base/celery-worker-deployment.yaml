@@ -1,0 +1,38 @@
+# celery worker deployment that consumes tasks from rabbitmq
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # deployment object name inside kubernetes
+  name: celery-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      # deployment manages pods carrying this app label
+      app: celery-worker
+  template:
+    metadata:
+      labels:
+        # pod label that must match the selector above
+        app: celery-worker
+    spec:
+      containers:
+        - name: celery-worker
+          # container name inside the pod, separate from the deployment name above
+          image: distributed-job-processing-system-celery_worker:latest
+          imagePullPolicy: IfNotPresent
+          # worker shares the same app config as the api
+          envFrom:
+            - configMapRef:
+                name: application-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: application-secrets
+                  key: DATABASE_URL
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: application-secrets
+                  key: CELERY_BROKER_URL

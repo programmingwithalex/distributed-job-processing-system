@@ -1,0 +1,7 @@
+# local overlay that reuses the shared base and injects local-only secrets
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: distributed-job-processing-system
+resources:
+  - ../../base
+  - secret.yaml

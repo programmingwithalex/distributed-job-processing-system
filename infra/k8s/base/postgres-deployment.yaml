@@ -1,0 +1,60 @@
+# postgres runs as an in-cluster dependency for the first local k8s pass
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # deployment object name inside kubernetes
+  name: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      # deployment manages pods carrying this app label
+      app: postgres
+  template:
+    metadata:
+      labels:
+        # pod label that must match the selector above
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          # container name inside the pod, separate from the deployment name above
+          image: postgres:16
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+          # database settings come from the shared secret
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: application-secrets
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: application-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: application-secrets
+                  key: POSTGRES_PASSWORD
+          # readiness checks whether postgres can accept connections
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          # liveness restarts the container if postgres stops responding
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 30
+            periodSeconds: 20

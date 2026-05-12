@@ -1,0 +1,15 @@
+# shared manifest bundle that defines the first-pass application stack
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - postgres-deployment.yaml
+  - postgres-service.yaml
+  - rabbitmq-deployment.yaml
+  - rabbitmq-service.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+  - celery-worker-deployment.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml

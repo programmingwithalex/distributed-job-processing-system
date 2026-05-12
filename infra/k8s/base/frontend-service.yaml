@@ -1,0 +1,15 @@
+# stable in-cluster endpoint for the frontend pod
+apiVersion: v1
+kind: Service
+metadata:
+  # service object name inside kubernetes
+  name: frontend
+spec:
+  selector:
+    # select pods labeled as the frontend workload
+    app: frontend
+  ports:
+    - name: http
+      port: 5173
+      # forward traffic to port 5173 on the matched frontend pods
+      targetPort: 5173

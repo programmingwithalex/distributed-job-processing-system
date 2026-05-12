@@ -105,6 +105,50 @@ The dashboard includes:
 - a selected-job panel that auto-refreshes until the job reaches `completed` or `failed`
 - a recent-jobs list with status filtering and row selection
 
+## Run on local Kubernetes with k3d
+
+Build the local images first:
+
+```bash
+docker compose build api celery_worker frontend
+```
+
+Create a local cluster:
+
+```bash
+k3d cluster create distributed-job-processing-system --agents 1
+```
+
+Import the local images into that cluster:
+
+```bash
+k3d image import distributed-job-processing-system-api:latest \
+  distributed-job-processing-system-celery_worker:latest \
+  distributed-job-processing-system-frontend:latest \
+  -c distributed-job-processing-system
+```
+
+Apply the local overlay:
+
+```bash
+kubectl apply -k infra/k8s/overlays/local
+```
+
+Wait for the pods:
+
+```bash
+kubectl get pods -n distributed-job-processing-system
+```
+
+Port-forward the frontend and API in separate terminals:
+
+```bash
+kubectl port-forward -n distributed-job-processing-system svc/frontend 5173:5173
+kubectl port-forward -n distributed-job-processing-system svc/api 8000:8000
+```
+
+The local Kubernetes base manifests live under `infra/k8s/base`, and the first local overlay lives under `infra/k8s/overlays/local`.
+
 ## API usage
 
 Health check:
