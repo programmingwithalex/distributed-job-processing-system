@@ -43,8 +43,12 @@ docker compose build api celery_worker frontend
 - create the cluster:
 
 ```bash
-k3d cluster create distributed-jobs --agents 1
+k3d cluster create distributed-jobs --agents 1 -p "8080:80@loadbalancer"
 ```
+
+- `-p "8080:80@loadbalancer"` publishes host port `8080` to port `80` on the special `k3d` load balancer container
+- `loadbalancer` is the target keyword because ingress traffic should enter the cluster through that shared entrypoint, not directly through an individual node
+- without that mapping, an ingress controller can still run inside the cluster, but `http://localhost:8080` will not reach it from your machine
 
 - import the images into the cluster:
 
@@ -57,6 +61,16 @@ k3d image import distributed-job-processing-system-api:latest distributed-job-pr
 ```bash
 kubectl apply -k infra/k8s/overlays/local
 ```
+
+- install the ingress-nginx controller:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
+kubectl get pods -n ingress-nginx -w
+```
+
+- the `deploy.yaml` file is the official upstream ingress-nginx install manifest published from the Kubernetes ingress-nginx repository
+- it creates the controller deployment plus the supporting namespace, RBAC, admission webhook, service accounts, and related resources needed to run ingress-nginx in the cluster
 
 - check pod state:
 
@@ -81,6 +95,14 @@ kubectl port-forward -n distributed-job-processing-system svc/api 8000:8000
 ```bash
 curl.exe http://localhost:8000/health
 ```
+
+## Why ingress-nginx exists
+
+- Kubernetes services are internal service-discovery objects; by themselves they do not give you one clean HTTP entrypoint for multiple apps
+- an ingress controller watches `Ingress` resources and turns host/path rules into actual reverse-proxy behavior
+- `ingress-nginx` is a widely used controller that accepts incoming HTTP traffic and routes it to the correct service based on rules such as hostnames or URL paths
+- this solves the problem of exposing multiple services through one stable entrypoint instead of juggling separate `port-forward` sessions for each service
+- for this project, that gives us a more realistic platform shape: host traffic enters through the k3d load balancer, reaches nginx ingress, then gets routed to the frontend or api service
 
 ## Helpful debugging commands
 
