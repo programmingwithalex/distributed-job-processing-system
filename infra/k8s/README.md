@@ -72,6 +72,13 @@ kubectl get pods -n ingress-nginx -w
 - the `deploy.yaml` file is the official upstream ingress-nginx install manifest published from the Kubernetes ingress-nginx repository
 - it creates the controller deployment plus the supporting namespace, RBAC, admission webhook, service accounts, and related resources needed to run ingress-nginx in the cluster
 
+- apply the project ingress resources:
+
+```bash
+kubectl apply -k infra/k8s/overlays/local
+kubectl get ingress -n distributed-job-processing-system
+```
+
 - check pod state:
 
 ```bash
@@ -96,6 +103,13 @@ kubectl port-forward -n distributed-job-processing-system svc/api 8000:8000
 curl.exe http://localhost:8000/health
 ```
 
+- ingress-based checks:
+
+```bash
+curl.exe http://localhost:8080/
+curl.exe http://localhost:8080/api/health
+```
+
 ## Why ingress-nginx exists
 
 - Kubernetes services are internal service-discovery objects; by themselves they do not give you one clean HTTP entrypoint for multiple apps
@@ -103,6 +117,7 @@ curl.exe http://localhost:8000/health
 - `ingress-nginx` is a widely used controller that accepts incoming HTTP traffic and routes it to the correct service based on rules such as hostnames or URL paths
 - this solves the problem of exposing multiple services through one stable entrypoint instead of juggling separate `port-forward` sessions for each service
 - for this project, that gives us a more realistic platform shape: host traffic enters through the k3d load balancer, reaches nginx ingress, then gets routed to the frontend or api service
+- in this repo, the frontend ingress handles `/`, while the api ingress handles `/api/...` and strips the `/api` prefix before forwarding to the FastAPI service
 
 ## Helpful debugging commands
 

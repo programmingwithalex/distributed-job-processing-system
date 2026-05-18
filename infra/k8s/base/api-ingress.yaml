@@ -1,0 +1,23 @@
+# route browser requests for /api/... to the api service through ingress-nginx
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api
+  annotations:
+    # let nginx treat the path as a regex so we can strip the /api prefix
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    # forward /api/foo as /foo to the FastAPI service
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                # send rewritten api requests to the api service
+                name: api
+                port:
+                  number: 8000
