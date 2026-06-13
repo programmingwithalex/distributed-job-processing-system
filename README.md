@@ -107,7 +107,45 @@ The dashboard includes:
 
 ## Run on local Kubernetes with k3d
 
-Build the local images first:
+Use the following block as the complete end-to-end deployment flow from a Windows Terminal Ubuntu tab. It includes cluster cleanup, image build, cluster creation, image import, ingress installation, manifest apply, and verification commands.
+
+```bash
+k3d cluster delete distributed-jobs
+
+docker compose build api celery_worker frontend
+
+k3d cluster create distributed-jobs \
+  --agents 1 \
+  -p "8080:80@loadbalancer" \
+  --k3s-arg "--disable=traefik@server:0"
+
+k3d image import \
+  distributed-job-processing-system-api:latest \
+  distributed-job-processing-system-celery_worker:latest \
+  distributed-job-processing-system-frontend:latest \
+  -c distributed-jobs
+
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
+kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=180s
+
+kubectl apply -k infra/k8s/overlays/local
+
+kubectl get pods -n dist-jobs
+kubectl get ingress -n dist-jobs
+
+curl http://localhost:8080/
+curl http://localhost:8080/api/health
+```
+
+The sections below break out each subcommand from that full block and explain what it does.
+
+Delete any existing local cluster first:
+
+```bash
+k3d cluster delete distributed-jobs
+```
+
+Build the local images:
 
 ```bash
 docker compose build api celery_worker frontend
@@ -116,8 +154,19 @@ docker compose build api celery_worker frontend
 Create a local cluster:
 
 ```bash
-k3d cluster create distributed-job-processing-system --agents 1
+k3d cluster create distributed-jobs --agents 1 -p "8080:80@loadbalancer" --k3s-arg "--disable=traefik@server:0"
 ```
+
+The `@loadbalancer` suffix is a k3d node filter, not a name defined in this repository.
+It targets the special `serverlb` container that k3d creates in front of the cluster,
+so host traffic on `localhost:8080` reaches the cluster ingress entrypoint. Use this
+filter for ingress-based access. Other filters such as `@server:0` or `@agent:0` target
+specific cluster nodes directly instead.
+
+The `--disable=traefik@server:0` argument turns off the default k3s Traefik ingress
+controller so the separately installed `ingress-nginx` controller receives traffic on the
+cluster entrypoint. If you created the cluster without this flag, delete and recreate it
+before testing ingress.
 
 Import the local images into that cluster:
 
@@ -125,7 +174,14 @@ Import the local images into that cluster:
 k3d image import distributed-job-processing-system-api:latest \
   distributed-job-processing-system-celery_worker:latest \
   distributed-job-processing-system-frontend:latest \
-  -c distributed-job-processing-system
+  -c distributed-jobs
+```
+
+Install the ingress controller:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
+kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=180s
 ```
 
 Apply the local overlay:
@@ -134,20 +190,31 @@ Apply the local overlay:
 kubectl apply -k infra/k8s/overlays/local
 ```
 
-Wait for the pods:
+Wait for the pods and inspect the ingress resources:
 
 ```bash
-kubectl get pods -n distributed-job-processing-system
+kubectl get pods -n dist-jobs
+kubectl get ingress -n dist-jobs
 ```
 
-Port-forward the frontend and API in separate terminals:
+Verify ingress routing:
 
 ```bash
-kubectl port-forward -n distributed-job-processing-system svc/frontend 5173:5173
-kubectl port-forward -n distributed-job-processing-system svc/api 8000:8000
+curl http://localhost:8080/
+curl http://localhost:8080/api/health
 ```
 
-The local Kubernetes base manifests live under `infra/k8s/base`, and the first local overlay lives under `infra/k8s/overlays/local`.
+Without ingress, the deployments still run normally, but external access to each service
+has to be exposed separately, often with different ports or port-forward sessions. With
+ingress, Kubernetes `Ingress` resources define routing rules, and a single ingress
+controller reads those rules and sends incoming HTTP traffic to the correct backend
+service.
+
+The frontend is exposed at <http://localhost:8080> and the API is exposed through the
+same ingress entrypoint at <http://localhost:8080/api/health>.
+
+The local Kubernetes base manifests live under `infra/k8s/base`, and the first local
+overlay lives under `infra/k8s/overlays/local`.
 
 ## API usage
 
