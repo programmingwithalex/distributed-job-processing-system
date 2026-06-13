@@ -1,0 +1,19 @@
+# exposes both amqp traffic and the management ui inside the cluster
+apiVersion: v1
+kind: Service
+metadata:
+  # service object name inside kubernetes
+  name: rabbitmq
+spec:
+  selector:
+    # select pods labeled as the rabbitmq workload
+    app: rabbitmq
+  ports:
+    - name: amqp
+      port: 5672
+      # forward broker traffic to port 5672 on the matched rabbitmq pods
+      targetPort: 5672
+    - name: management
+      port: 15672
+      # forward management ui traffic to port 15672 on the matched rabbitmq pods
+      targetPort: 15672

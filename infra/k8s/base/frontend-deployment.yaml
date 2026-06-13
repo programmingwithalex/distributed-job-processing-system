@@ -1,0 +1,40 @@
+# react frontend deployment using the existing dev-server image
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # deployment object name inside kubernetes
+  name: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      # deployment manages pods carrying this app label
+      app: frontend
+  template:
+    metadata:
+      labels:
+        # pod label that must match the selector above
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          # container name inside the pod, separate from the deployment name above
+          image: distributed-job-processing-system-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5173
+          # frontend uses configmap values to know where to proxy api calls
+          envFrom:
+            - configMapRef:
+                name: application-config
+          # tcp checks are enough here because the container runs vite directly
+          readinessProbe:
+            tcpSocket:
+              port: 5173
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 5173
+            initialDelaySeconds: 30
+            periodSeconds: 20
