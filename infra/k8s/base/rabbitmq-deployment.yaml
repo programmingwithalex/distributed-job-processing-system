@@ -1,0 +1,73 @@
+# rabbitmq provides the broker used by celery tasks
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # deployment name inside the namespace
+  name: rabbitmq
+spec:
+  # single broker instance for local development
+  replicas: 1
+  selector:
+    matchLabels:
+      # deployment manages pods with this label
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        # pod label must match the selector above
+        app: rabbitmq
+    spec:
+      containers:
+        - name: rabbitmq
+          # management image gives both AMQP and admin UI
+          image: rabbitmq:3.13-management
+          # avoid re-pulling if the image is already present locally
+          imagePullPolicy: IfNotPresent
+          ports:
+            # AMQP port used by celery workers and producers
+            - containerPort: 5672
+            # management UI port
+            - containerPort: 15672
+
+          # startup probe gives RabbitMQ extra time to boot before liveness checks begin
+          startupProbe:
+            exec:
+              command:
+                - rabbitmq-diagnostics
+                - ping
+            # run every 5 seconds during startup
+            periodSeconds: 5
+            # allow the command up to 5 seconds to respond
+            timeoutSeconds: 5
+            # allow up to 30 failed checks before kubelet gives up
+            failureThreshold: 30
+
+          # readiness probe determines when the broker is ready to receive traffic
+          readinessProbe:
+            exec:
+              command:
+                - rabbitmq-diagnostics
+                - ping
+            # wait a bit before the first readiness check
+            initialDelaySeconds: 10
+            # check readiness every 10 seconds
+            periodSeconds: 10
+            # allow the check up to 5 seconds to complete
+            timeoutSeconds: 5
+            # mark unready after repeated failures
+            failureThreshold: 6
+
+          # liveness probe restarts the container only after startup has completed
+          livenessProbe:
+            exec:
+              command:
+                - rabbitmq-diagnostics
+                - ping
+            # wait longer before starting liveness checks
+            initialDelaySeconds: 30
+            # check liveness every 20 seconds
+            periodSeconds: 20
+            # allow the check up to 5 seconds to complete
+            timeoutSeconds: 5
+            # restart only after repeated failures
+            failureThreshold: 6

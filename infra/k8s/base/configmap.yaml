@@ -1,0 +1,13 @@
+# non-secret settings shared by the api, worker, and frontend
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: application-config
+data:
+  APP_ENV: local
+  LOG_LEVEL: INFO
+  API_HOST: 0.0.0.0
+  API_PORT: "8000"
+  DEFAULT_MAXIMUM_ATTEMPT_COUNT: "3"
+  # frontend uses the api service name for in-cluster proxying
+  API_PROXY_TARGET: http://api:8000
