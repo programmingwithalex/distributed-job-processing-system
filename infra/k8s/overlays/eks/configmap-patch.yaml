@@ -1,0 +1,7 @@
+# EKS-specific non-secret config overrides layered onto the shared base configmap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: application-config
+data:
+  APP_ENV: eks
