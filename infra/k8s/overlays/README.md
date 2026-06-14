@@ -11,8 +11,10 @@ overlays/
 │   ├── kustomization.yaml
 │   └── secret.yaml
 └── eks/
+    ├── README.md
     ├── configmap-patch.yaml
     ├── kustomization.yaml
+    ├── publish-images.sh
     └── secret.example.yaml
 ```
 
@@ -61,6 +63,8 @@ Apply with:
 ```bash
 kubectl apply -k infra/k8s/overlays/eks
 ```
+
+For ECR image publishing and overlay image updates, see [infra/k8s/overlays/eks/README.md](c:/Users/Alex/OneDrive/Documents/GitHub/distributed-job-processing-system/infra/k8s/overlays/eks/README.md).
 
 ## Rule Of Thumb
 
