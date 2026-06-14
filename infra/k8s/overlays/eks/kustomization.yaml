@@ -10,13 +10,13 @@ resources:
 # application-secrets Secret externally before deploying this overlay to EKS
 images:
   - name: distributed-job-processing-system-api:latest
-    newName: 123456789012.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-api
-    newTag: latest
+    newName: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-api
+    newTag: v1
   - name: distributed-job-processing-system-celery_worker:latest
-    newName: 123456789012.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-celery-worker
-    newTag: latest
+    newName: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-celery-worker
+    newTag: v1
   - name: distributed-job-processing-system-frontend:latest
-    newName: 123456789012.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-frontend
-    newTag: latest
+    newName: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-frontend
+    newTag: v1
 patches:
   - path: configmap-patch.yaml
