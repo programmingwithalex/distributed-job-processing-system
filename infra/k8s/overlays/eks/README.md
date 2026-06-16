@@ -10,6 +10,16 @@ AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 bash infra/k8s/overlays/eks/publish-images.sh "$AWS_ACCOUNT_ID" us-east-1 v1
 ```
 
+Will also update `.\kustomization.yaml` with ECR images after pushed.
+
+Teardown when you only want to remove the ECR repositories:
+
+```bash
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+bash infra/k8s/overlays/eks/teardown-ecr-repos.sh "$AWS_ACCOUNT_ID" us-east-1
+```
+
 ## Prerequisites
 
 - AWS CLI authenticated to the target AWS account
