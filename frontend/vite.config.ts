@@ -9,8 +9,9 @@ const apiProxyTarget = process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8000";
 export default defineConfig({
   plugins: [react()],
   server: {
-    host: "127.0.0.1",
+    host: "0.0.0.0",  // allow access from other devices (to allow AWS ELB entrypoint)
     port: 5173,
+    allowedHosts: true,
     proxy: {
       "/api": {
         target: apiProxyTarget,
