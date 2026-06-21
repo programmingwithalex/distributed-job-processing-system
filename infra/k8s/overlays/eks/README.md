@@ -7,10 +7,12 @@ Quick start:
 ```bash
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-bash infra/k8s/overlays/eks/publish-images.sh "$AWS_ACCOUNT_ID" us-east-1 v1
+bash infra/k8s/overlays/eks/publish-images.sh "$AWS_ACCOUNT_ID" us-east-1 v2
 ```
 
-Will also update `.\kustomization.yaml` with ECR images after pushed.
+Will also update `./kustomization.yaml` with ECR images after pushed.
+
+For cluster creation, deployment, and EKS teardown, use [DEPLOYMENT.md](./DEPLOYMENT.md).
 
 Teardown when you only want to remove the ECR repositories:
 
@@ -31,8 +33,10 @@ bash infra/k8s/overlays/eks/teardown-ecr-repos.sh "$AWS_ACCOUNT_ID" us-east-1
 Run the helper from a Bash shell such as WSL:
 
 ```bash
-bash infra/k8s/overlays/eks/publish-images.sh <aws_account_id> us-east-1 v1
+bash infra/k8s/overlays/eks/publish-images.sh <aws_account_id> us-east-1 <image_tag>
 ```
+
+Use a new image tag for each publish (for example `v2`, `v3`, or a git-sha-like tag).
 
 The script will:
 
@@ -42,15 +46,16 @@ The script will:
 - authenticate Docker to ECR
 - build the `api`, `celery_worker`, and `frontend` images with Docker Compose
 - tag and push those images to ECR
-- update [kustomization.yaml](c:/Users/Alex/OneDrive/Documents/GitHub/distributed-job-processing-system/infra/k8s/overlays/eks/kustomization.yaml) with the ECR image URLs and tag
+- update [kustomization.yaml](./kustomization.yaml) with the ECR image URLs and tag
 
 ## Equivalent Manual Commands
 
 ```bash
-AWS_ACCOUNT_ID=123456789012
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 AWS_REGION=us-east-1
 IMAGE_TAG=v1
 ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+CLUSTER_NAME=dist-jobs
 
 aws ecr create-repository --repository-name distributed-job-processing-system-api --region "$AWS_REGION"
 aws ecr create-repository --repository-name distributed-job-processing-system-celery-worker --region "$AWS_REGION"
