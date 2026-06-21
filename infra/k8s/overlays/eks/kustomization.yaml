@@ -1,0 +1,22 @@
+# EKS overlay that reuses the shared base and overrides only environment-specific values
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: dist-jobs
+resources:
+  - ../../base
+
+# do not add secret.example.yaml here as a live resource
+# create an uncommitted secret.yaml from secret.example.yaml or create the
+# application-secrets Secret externally before deploying this overlay to EKS
+images:
+  - name: distributed-job-processing-system-api:latest
+    newName: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-api
+    newTag: v2
+  - name: distributed-job-processing-system-celery_worker:latest
+    newName: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-celery-worker
+    newTag: v2
+  - name: distributed-job-processing-system-frontend:latest
+    newName: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-frontend
+    newTag: v2
+patches:
+  - path: configmap-patch.yaml
