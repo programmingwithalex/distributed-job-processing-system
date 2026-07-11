@@ -14,10 +14,16 @@ This directory contains the first local Kubernetes deployment for the project.
 - a cluster is the whole Kubernetes system; a node is one machine inside that cluster where pods actually run
 - in `k3d`, each node is implemented as a Docker container
 - `--agents 1` adds one worker node to the cluster in addition to the default control-plane node
-- `kustomize` is a manifest composition tool; it lets us reuse a shared manifest set and layer environment-specific changes on top
-- `base/kustomization.yaml` lists the common resources that define the application stack
-- `overlays/local/kustomization.yaml` says to reuse `../../base`, add the local secret, and stamp the namespace onto the rendered resources
 - `overlays/local/secret.yaml` provides the concrete secret values for local development
+
+## Kustomize structure
+
+- `kustomize` is a manifest composition tool; it lets us reuse a shared manifest set and layer environment-specific changes on top
+- each `kustomization.yaml` file acts like a grouping and assembly point for Kubernetes resources; it tells `kustomize` which manifests to include and what changes to apply before anything is sent to the cluster
+- `base/kustomization.yaml` lists the common resources that define the application stack
+- `overlays/local/kustomization.yaml` lives in a subdirectory because that folder represents one environment-specific layer; it says to reuse `../../base`, add the local secret, and stamp the namespace onto the rendered resources
+- overlay `kustomization.yaml` files usually do two jobs at once: they point back to the shared base manifests and they declare the overrides for that environment, such as secrets, image replacements, patches, or namespace settings
+- the subdirectory layout matters because it makes the intent clear: `base/` holds the reusable templates, while folders such as `overlays/local/` or `overlays/eks/` hold the `kustomization.yaml` file that explains how to customize that base for one target environment
 
 ## Why the image build step exists
 
