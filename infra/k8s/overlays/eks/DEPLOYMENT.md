@@ -65,6 +65,27 @@ After updating kubeconfig and before applying resources, confirm `kubectl` is ta
 kubectl config current-context
 ```
 
+## Deploy The Complete Application Stack
+
+After Terraform has created the EKS cluster, this helper automates the remaining deployment steps: kubeconfig update, ingress-nginx installation, namespace and secret creation, ECR image publishing, Kustomize apply, and workload rollout checks.
+
+```bash
+bash infra/k8s/overlays/eks/deploy-eks-application-stack.sh
+```
+
+The helper runs the following steps in order:
+
+1. Updates local kubeconfig for the `dist-jobs` EKS cluster so subsequent `kubectl` commands target the correct cluster.
+2. Applies the ingress-nginx cloud manifest and waits for the ingress controller deployment to become available.
+3. Creates the `dist-jobs` namespace idempotently.
+4. Creates `application-secrets` if it does not already exist, including a generated Postgres password and the application database and broker connection values. On later runs, it preserves the existing Secret to avoid rotating database credentials.
+5. Runs [publish-images.sh](./publish-images.sh), which builds the API, Celery worker, and frontend images, authenticates Docker to ECR, pushes the images, and updates [kustomization.yaml](./kustomization.yaml) with the ECR image references.
+6. Applies the EKS Kustomize overlay, rendering the shared base manifests with EKS-specific image and configuration overrides.
+7. Waits for Postgres, RabbitMQ, API, Celery worker, and frontend deployment rollouts to complete.
+8. Displays the application pods, Services, Ingress resources, and the ingress controller load balancer hostname for follow-up testing.
+
+The manual steps below remain available for troubleshooting or when individual control over each step is required.
+
 ## Install ingress-nginx
 
 Install `ingress-nginx-controller` and then verify it's running:
