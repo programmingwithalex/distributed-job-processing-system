@@ -82,10 +82,7 @@ terraform -chdir=infra/terraform output -raw kubeconfig_command
 Then publish images and deploy the application overlay:
 
 ```bash
-AWS_ACCOUNT_ID=$(terraform -chdir=infra/terraform output -raw aws_account_id)
-AWS_REGION=$(terraform -chdir=infra/terraform output -raw aws_region)
-
-bash infra/k8s/overlays/eks/publish-images.sh "$AWS_ACCOUNT_ID" "$AWS_REGION" <image_tag>
+bash infra/k8s/overlays/eks/publish-images.sh
 kubectl apply -k infra/k8s/overlays/eks
 ```
 

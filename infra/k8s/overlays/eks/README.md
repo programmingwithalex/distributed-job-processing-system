@@ -7,12 +7,20 @@ Quick start:
 ```bash
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-bash infra/k8s/overlays/eks/publish-images.sh "$AWS_ACCOUNT_ID" us-east-1 v2
+bash infra/k8s/overlays/eks/publish-images.sh
 ```
 
 Will also update `./kustomization.yaml` with ECR images after pushed.
 
 For cluster creation, deployment, and EKS teardown, use [DEPLOYMENT.md](./DEPLOYMENT.md).
+
+After Terraform creates the cluster, deploy the complete application stack with:
+
+```bash
+bash infra/k8s/overlays/eks/deploy-eks-application-stack.sh
+```
+
+The script updates kubeconfig, installs ingress-nginx, creates the namespace and application secret when absent, publishes images to ECR, applies the EKS overlay, and waits for workload rollouts. It preserves an existing `application-secrets` Secret so rerunning it does not rotate database credentials.
 
 Teardown when you only want to remove the ECR repositories:
 
@@ -33,7 +41,7 @@ bash infra/k8s/overlays/eks/teardown-ecr-repos.sh "$AWS_ACCOUNT_ID" us-east-1
 Run the helper from a Bash shell such as WSL:
 
 ```bash
-bash infra/k8s/overlays/eks/publish-images.sh <aws_account_id> us-east-1 <image_tag>
+bash infra/k8s/overlays/eks/publish-images.sh
 ```
 
 Use a new image tag for each publish (for example `v2`, `v3`, or a git-sha-like tag).

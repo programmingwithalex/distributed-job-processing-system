@@ -32,5 +32,5 @@ output "aws_account_id" {
 
 output "publish_images_example" {
   description = "Example command to publish images after Terraform apply"
-  value       = "bash infra/k8s/overlays/eks/publish-images.sh ${data.aws_caller_identity.current.account_id} ${var.aws_region} <image_tag>"
+  value       = "bash infra/k8s/overlays/eks/publish-images.sh"
 }
