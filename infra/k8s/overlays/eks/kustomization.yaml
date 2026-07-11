@@ -11,12 +11,12 @@ resources:
 images:
   - name: distributed-job-processing-system-api:latest
     newName: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-api
-    newTag: v2
+    newTag: v1
   - name: distributed-job-processing-system-celery_worker:latest
     newName: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-celery-worker
-    newTag: v2
+    newTag: v1
   - name: distributed-job-processing-system-frontend:latest
     newName: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-frontend
-    newTag: v2
+    newTag: v1
 patches:
   - path: configmap-patch.yaml
