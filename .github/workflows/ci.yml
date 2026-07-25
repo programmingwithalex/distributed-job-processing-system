@@ -1,0 +1,89 @@
+name: Continuous Integration
+
+# validate every pull request without requiring AWS credentials
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # validate the FastAPI and worker code independently of browser tests
+  backend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.7.13"
+
+      - name: Install backend dependencies
+        run: uv sync --extra dev
+
+      - name: Lint backend code
+        run: uv run ruff check .
+
+      - name: Test backend code
+        run: uv run pytest
+
+  # run the dashboard against the local Compose dependency stack
+  frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: frontend
+        run: pnpm build
+
+      - name: Start local application stack
+        run: docker compose up --build --detach
+
+      - name: Wait for local API
+        run: |
+          # browser tests require the API before they can create and query jobs
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:8000/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Run frontend end-to-end tests
+        working-directory: frontend
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm test:e2e
+
+      - name: Upload Playwright artifacts
+        # retain browser diagnostics only when an end-to-end test fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          if-no-files-found: ignore
+
+      - name: Stop local application stack
+        # release runner resources even if a prior step fails
+        if: always()
+        run: docker compose down --volumes

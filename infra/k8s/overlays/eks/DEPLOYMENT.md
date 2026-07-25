@@ -86,6 +86,16 @@ The helper runs the following steps in order:
 
 The manual steps below remain available for troubleshooting or when individual control over each step is required.
 
+## Destroy The EKS Application Stack
+
+For the Terraform-managed EKS environment, use the ordered destroy helper rather than `eksctl`:
+
+```bash
+bash infra/k8s/overlays/eks/destroy-eks-application-stack.sh --confirm
+```
+
+The helper removes the application and ingress-nginx resources, waits for namespace cleanup, and then runs `terraform destroy`. The ECR repositories are configured for force deletion, so images do not block teardown. The persistent Terraform state bootstrap bucket is intentionally not destroyed.
+
 ## Install ingress-nginx
 
 Install `ingress-nginx-controller` and then verify it's running:
