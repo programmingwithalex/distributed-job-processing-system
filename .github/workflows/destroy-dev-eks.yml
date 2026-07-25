@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  # request a short-lived OIDC token for AWS role assumption instead of stored keys
   id-token: write
 
 concurrency:
@@ -21,6 +22,7 @@ concurrency:
 env:
   # state bucket is a repository variable because it is account-specific but not secret
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  # role created by the Terraform bootstrap configuration and trusted by AWS for this repository
   AWS_GITHUB_ACTIONS_ROLE_ARN: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
   TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
   TF_STATE_KEY: distributed-job-processing-system/dev/terraform.tfstate
@@ -36,6 +38,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
+          # exchange the GitHub OIDC token for short-lived AWS credentials
           role-to-assume: ${{ env.AWS_GITHUB_ACTIONS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
