@@ -2,11 +2,11 @@
 
 set -euo pipefail
 
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-AWS_REGION=us-east-1
-IMAGE_TAG=v1
+AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-$(aws sts get-caller-identity --query Account --output text)}"
+AWS_REGION="${AWS_REGION:-us-east-1}"
+IMAGE_TAG="${IMAGE_TAG:-$(git rev-parse --short=12 HEAD)}"
 ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-CLUSTER_NAME=dist-jobs
+CLUSTER_NAME="${CLUSTER_NAME:-dist-jobs}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 overlay_file="$repo_root/infra/k8s/overlays/eks/kustomization.yaml"
@@ -65,4 +65,5 @@ sed -i \
   "$overlay_file"
 
 echo "done"
+echo "published immutable image tag: ${IMAGE_TAG}"
 echo "render check: kubectl kustomize infra/k8s/overlays/eks"

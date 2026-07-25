@@ -21,16 +21,37 @@ Terraform does not manage Kubernetes application resources. Continue to deploy t
 - `eks.tf` creates the EKS cluster and managed node group through the EKS module
 - `ecr.tf` creates the three ECR repositories used by the application images
 - `outputs.tf` exposes kubeconfig and image-publishing values
+- `backend.hcl.example` shows the uncommitted S3 backend settings for the EKS state
+- `bootstrap/` creates the persistent S3 state bucket that survives EKS teardown
 - `verify-resources.sh` checks the Terraform-created AWS resources from Bash with Terraform outputs and the AWS CLI
 - `verify-resources.ps1` checks the Terraform-created AWS resources with Terraform outputs and the AWS CLI
 - `terraform.tfvars.example` shows safe example input values
 
 ## Usage
 
+## One-time Remote State Setup
+
+The EKS environment lifecycle is managed separately from its persistent Terraform state bucket. Create the bucket once with the bootstrap configuration:
+
+```bash
+terraform -chdir=infra/terraform/bootstrap init
+terraform -chdir=infra/terraform/bootstrap apply
+```
+
+Copy [backend.hcl.example](./backend.hcl.example) to an uncommitted `backend.hcl`, replacing the bucket name with the bootstrap `state_bucket_name` output. Then initialize the EKS stack with S3 versioning, encryption, and native S3 lockfiles:
+
+```bash
+terraform -chdir=infra/terraform init -migrate-state -backend-config=backend.hcl
+```
+
+If the EKS stack has never been applied, omit `-migrate-state`. Do not destroy `infra/terraform/bootstrap` during EKS teardown; it protects the state needed to recreate the environment.
+
+## Local Usage
+
 Initialize Terraform:
 
 ```bash
-terraform -chdir=infra/terraform init
+terraform -chdir=infra/terraform init -backend-config=backend.hcl
 ```
 
 `terraform init` creates `.terraform.lock.hcl`, which records the exact provider versions selected for this configuration. Keep that lock file in version control so everyone uses the same provider versions unless you intentionally upgrade them.
@@ -38,7 +59,7 @@ terraform -chdir=infra/terraform init
 When you intentionally want newer provider or module releases that still satisfy the version constraints in this configuration, run:
 
 ```bash
-terraform -chdir=infra/terraform init -upgrade
+terraform -chdir=infra/terraform init -upgrade -backend-config=backend.hcl
 ```
 
 This refreshes the dependency selections and updates `.terraform.lock.hcl` to the newer allowed versions.
@@ -82,9 +103,10 @@ terraform -chdir=infra/terraform output -raw kubeconfig_command
 Then publish images and deploy the application overlay:
 
 ```bash
-bash infra/k8s/overlays/eks/publish-images.sh
-kubectl apply -k infra/k8s/overlays/eks
+bash infra/k8s/overlays/eks/deploy-eks-application-stack.sh
 ```
+
+`publish-images.sh` assigns a Git commit SHA tag by default. Override `IMAGE_TAG` only with another immutable identifier.
 
 ## Destroy Instructions
 
@@ -100,5 +122,26 @@ kubectl delete -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/mai
 Wait until the ingress load balancer is gone, then destroy the AWS infrastructure:
 
 ```bash
-terraform -chdir=infra/terraform destroy -var-file=terraform.tfvars
+bash infra/k8s/overlays/eks/destroy-eks-application-stack.sh --confirm
 ```
+
+The helper deletes Kubernetes and ingress resources, waits for namespace cleanup, and runs Terraform destroy. ECR repositories use `force_delete = true`, so pushed images do not block teardown.
+
+## GitHub Actions Development Lifecycle
+
+The workflows are manual and use one shared concurrency group, so deploy and destroy cannot run at the same time:
+
+- **Continuous Integration** runs backend lint/tests and frontend build/end-to-end checks for every pull request.
+- **Deploy EKS Environment** provisions the Terraform stack, publishes commit-SHA-tagged images, deploys the application, and reports the ingress endpoint.
+- **Destroy EKS Environment** requires the exact confirmation value `DESTROY`, then removes the application and all Terraform-managed EKS resources.
+
+Before using the deploy or destroy workflows, configure these repository values and secrets:
+
+| Type | Name | Value |
+| --- | --- | --- |
+| Variable | `AWS_REGION` | AWS region, such as `us-east-1` |
+| Variable | `TF_STATE_BUCKET` | `state_bucket_name` from the bootstrap output |
+| Secret | `AWS_ACCESS_KEY_ID` | Access key for the dedicated environment-management IAM principal |
+| Secret | `AWS_SECRET_ACCESS_KEY` | Matching secret access key |
+
+The IAM principal must be limited to the intended AWS account and permitted to manage the Terraform-created EKS, EC2/VPC, ECR, IAM, CloudWatch, and S3-state resources. Rotate these long-lived keys regularly. The workflow never prints secret values.

@@ -1,0 +1,81 @@
+name: Destroy EKS Environment
+
+# require an explicit operator dispatch before removing shared AWS infrastructure
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type DESTROY to permanently remove the EKS environment
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # do not permit destruction while a deployment owns the Terraform state
+  group: eks-environment-lifecycle
+  cancel-in-progress: false
+
+env:
+  # state bucket is a repository variable because it is account-specific but not secret
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  TF_STATE_KEY: distributed-job-processing-system/dev/terraform.tfstate
+
+jobs:
+  destroy:
+    # protect the destructive operation with an exact confirmation value
+    if: inputs.confirmation == 'DESTROY'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - uses: azure/setup-kubectl@v4
+
+      - name: Validate AWS identity and backend settings
+        run: |
+          test -n "$TF_STATE_BUCKET"
+          aws sts get-caller-identity
+
+      - name: Initialize Terraform state
+        run: |
+          # use the same S3 object and native lockfile as the deployment workflow
+          terraform -chdir=infra/terraform init -input=false \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=$TF_STATE_KEY" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      - name: Destroy application and AWS infrastructure
+        run: bash infra/k8s/overlays/eks/destroy-eks-application-stack.sh --confirm
+
+      - name: Verify resource removal
+        run: |
+          # confirm both Terraform state and AWS resource discovery are clear
+          test -z "$(terraform -chdir=infra/terraform state list)"
+          ! aws eks describe-cluster --name dist-jobs --region "$AWS_REGION" >/dev/null 2>&1
+          ! aws ecr describe-repositories --region "$AWS_REGION" --repository-names \
+            distributed-job-processing-system-api \
+            distributed-job-processing-system-celery-worker \
+            distributed-job-processing-system-frontend >/dev/null 2>&1
+          test -z "$(aws resourcegroupstaggingapi get-resources --region "$AWS_REGION" --tag-filters Key=Project,Values=distributed-job-processing-system --resource-type-filters elasticloadbalancing:loadbalancer --query 'ResourceTagMappingList[].ResourceARN' --output text)"
+          test -z "$(aws ec2 describe-nat-gateways --region "$AWS_REGION" --filter 'Name=tag:Project,Values=distributed-job-processing-system' 'Name=state,Values=available,pending' --query 'NatGateways[].NatGatewayId' --output text)"
+
+      - name: Write destruction summary
+        run: |
+          {
+            echo "## EKS environment destroyed"
+            echo
+            echo "Terraform state is empty and the EKS, ECR, load balancer, and active NAT gateway checks passed."
+          } >> "$GITHUB_STEP_SUMMARY"

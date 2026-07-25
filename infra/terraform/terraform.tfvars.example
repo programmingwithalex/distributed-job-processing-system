@@ -2,7 +2,7 @@ aws_region         = "us-east-1"
 project_name       = "distributed-job-processing-system"
 environment        = "eks"
 cluster_name       = "dist-jobs"
-kubernetes_version = "1.31"
+kubernetes_version = "1.36"
 
 vpc_cidr = "10.0.0.0/16"
 
