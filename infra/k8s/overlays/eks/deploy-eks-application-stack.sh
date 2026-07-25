@@ -2,9 +2,9 @@
 
 set -euo pipefail
 
-AWS_REGION=us-east-1
-CLUSTER_NAME=dist-jobs
-NAMESPACE=dist-jobs
+AWS_REGION="${AWS_REGION:-us-east-1}"
+CLUSTER_NAME="${CLUSTER_NAME:-dist-jobs}"
+NAMESPACE="${NAMESPACE:-dist-jobs}"
 INGRESS_NGINX_MANIFEST="https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"

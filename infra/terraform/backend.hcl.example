@@ -1,0 +1,7 @@
+# Copy this file to backend.hcl after applying infra/terraform/bootstrap.
+# The bucket name must be globally unique and is intentionally not committed.
+bucket       = "replace-with-bootstrap-output"
+key          = "distributed-job-processing-system/dev/terraform.tfstate"
+region       = "us-east-1"
+encrypt      = true
+use_lockfile = true
