@@ -11,6 +11,11 @@ on:
 
 permissions:
   contents: read
+  # ---------------------------------------------------------------------------
+  # github oidc: request a token so aws can issue short-lived role credentials
+  # this replaces AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY repository secrets
+  # inspect the role trust in aws iam → dist-jobs-github-actions → trust relationships
+  # ---------------------------------------------------------------------------
   # request a short-lived OIDC token for AWS role assumption instead of stored keys
   id-token: write
 
