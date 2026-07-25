@@ -54,7 +54,7 @@ In the repository **Settings → Secrets and variables → Actions**, create the
 | `TF_STATE_BUCKET` | The `state_bucket_name` from the bootstrap output |
 | `AWS_GITHUB_ACTIONS_ROLE_ARN` | The `github_actions_role_arn` from the bootstrap output |
 
-The workflows assume the `AWS_GITHUB_ACTIONS_ROLE_ARN` through GitHub OIDC. Do not create `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` repository secrets. `TF_STATE_KEY` is defined in the workflow source as `distributed-job-processing-system/dev/terraform.tfstate`; do not create it in GitHub settings.
+The workflows assume the `AWS_GITHUB_ACTIONS_ROLE_ARN` through GitHub OIDC. Do not create `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` repository secrets. In the AWS IAM console, the GitHub OIDC trust policy is visible under the `dist-jobs-github-actions` role's **Trust relationships** tab. `TF_STATE_KEY` is defined in the workflow source as `distributed-job-processing-system/dev/terraform.tfstate`; do not create it in GitHub settings.
 
 ### 3. Migrate Existing Local State Once
 

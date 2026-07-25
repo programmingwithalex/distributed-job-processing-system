@@ -1,11 +1,14 @@
 provider "aws" {
+  # bootstrap resources are intentionally retained independently of the EKS stack
   region = var.aws_region
 }
 
+# append entropy to the state bucket name because S3 bucket names are global
 resource "random_id" "state_bucket_suffix" {
   byte_length = 4
 }
 
+# persist the main EKS Terraform state outside the EKS lifecycle
 resource "aws_s3_bucket" "terraform_state" {
   bucket        = "dist-jobs-tf-state-${data.aws_caller_identity.current.account_id}-${random_id.state_bucket_suffix.hex}"
   force_destroy = false
@@ -17,6 +20,7 @@ resource "aws_s3_bucket" "terraform_state" {
   }
 }
 
+# reject any public access path to the state bucket
 resource "aws_s3_bucket_public_access_block" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
 
@@ -26,6 +30,7 @@ resource "aws_s3_bucket_public_access_block" "terraform_state" {
   restrict_public_buckets = true
 }
 
+# disable ACLs so the owning AWS account controls every state object
 resource "aws_s3_bucket_ownership_controls" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
 
@@ -34,6 +39,7 @@ resource "aws_s3_bucket_ownership_controls" "terraform_state" {
   }
 }
 
+# retain prior state revisions for recovery from accidental or failed changes
 resource "aws_s3_bucket_versioning" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
 
@@ -42,6 +48,7 @@ resource "aws_s3_bucket_versioning" "terraform_state" {
   }
 }
 
+# use AWS-managed server-side encryption for all stored Terraform state objects
 resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
 
@@ -52,33 +59,46 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" 
   }
 }
 
+# -----------------------------------------------------------------------------
+# github actions oidc authentication
+# replaces stored aws iam user credentials with short-lived sts role credentials
+# visible in aws iam at roles → dist-jobs-github-actions → trust relationships
+# -----------------------------------------------------------------------------
+
+# retrieve GitHub's current certificate thumbprint for the AWS OIDC provider
 data "tls_certificate" "github_actions" {
   url = "https://token.actions.githubusercontent.com"
 }
 
+# establish GitHub Actions as a federated identity provider in this AWS account
+# this replaces stored AWS IAM user access keys with short-lived role credentials
 resource "aws_iam_openid_connect_provider" "github_actions" {
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
   thumbprint_list = [data.tls_certificate.github_actions.certificates[0].sha1_fingerprint]
 }
 
+# construct the trust policy that governs who may assume the deployment role
 data "aws_iam_policy_document" "github_actions_assume_role" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
     effect  = "Allow"
 
     principals {
+      # use the provider ARN rather than a hardcoded account-specific value
       type        = "Federated"
       identifiers = [aws_iam_openid_connect_provider.github_actions.arn]
     }
 
     condition {
+      # accept only GitHub-issued tokens intended for AWS STS
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:aud"
       values   = ["sts.amazonaws.com"]
     }
 
     condition {
+      # restrict role assumption to workflow runs from the configured repository branch
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
       values   = ["repo:${var.github_repository}:ref:refs/heads/${var.github_actions_branch}"]
@@ -86,6 +106,8 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
   }
 }
 
+# issue short-lived AWS credentials to approved GitHub Actions workflow runs
+# workflows authenticate with GitHub OIDC rather than AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
 resource "aws_iam_role" "github_actions" {
   name               = "dist-jobs-github-actions"
   assume_role_policy = data.aws_iam_policy_document.github_actions_assume_role.json
@@ -97,8 +119,10 @@ resource "aws_iam_role" "github_actions" {
   }
 }
 
+# define the permissions required to provision, deploy, verify, and destroy this environment
 data "aws_iam_policy_document" "github_actions_environment_management" {
   statement {
+    # discover the state bucket configuration and enumerate the configured state prefix
     sid       = "TerraformState"
     effect    = "Allow"
     actions   = ["s3:GetBucketVersioning", "s3:ListBucket"]
@@ -106,6 +130,7 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
   }
 
   statement {
+    # read, update, and remove the state object and S3 native lockfile
     sid    = "TerraformStateObjects"
     effect = "Allow"
     actions = [
@@ -117,6 +142,7 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
   }
 
   statement {
+    # publish application images and remove the repositories during Terraform teardown
     sid    = "EcrRepositories"
     effect = "Allow"
     actions = [
@@ -140,6 +166,7 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
   }
 
   statement {
+    # ECR authorization tokens do not support repository-level resource restrictions
     sid       = "EcrAuthorization"
     effect    = "Allow"
     actions   = ["ecr:GetAuthorizationToken"]
@@ -147,6 +174,7 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
   }
 
   statement {
+    # Terraform EKS and VPC modules require these AWS control-plane lifecycle actions
     sid    = "EksAndSupportingInfrastructure"
     effect = "Allow"
     actions = [
@@ -250,10 +278,12 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
   }
 }
 
+# attach the environment-management policy directly to the federated deployment role
 resource "aws_iam_role_policy" "github_actions_environment_management" {
   name   = "dist-jobs-environment-management"
   role   = aws_iam_role.github_actions.id
   policy = data.aws_iam_policy_document.github_actions_environment_management.json
 }
 
+# resolve the account ID for globally unique names and account-scoped policy resources
 data "aws_caller_identity" "current" {}
