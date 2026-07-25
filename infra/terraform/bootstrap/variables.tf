@@ -9,3 +9,15 @@ variable "project_name" {
   type        = string
   default     = "distributed-job-processing-system"
 }
+
+variable "github_repository" {
+  description = "GitHub owner and repository allowed to assume the deployment role"
+  type        = string
+  default     = "programmingwithalex/distributed-job-processing-system"
+}
+
+variable "github_actions_branch" {
+  description = "Git branch allowed to assume the deployment role"
+  type        = string
+  default     = "main"
+}
