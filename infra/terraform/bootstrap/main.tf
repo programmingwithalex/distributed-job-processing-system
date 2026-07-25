@@ -7,7 +7,7 @@ resource "random_id" "state_bucket_suffix" {
 }
 
 resource "aws_s3_bucket" "terraform_state" {
-  bucket        = "${var.project_name}-tf-state-${data.aws_caller_identity.current.account_id}-${random_id.state_bucket_suffix.hex}"
+  bucket        = "dist-jobs-tf-state-${data.aws_caller_identity.current.account_id}-${random_id.state_bucket_suffix.hex}"
   force_destroy = false
 
   tags = {
