@@ -50,15 +50,9 @@ In the repository **Settings → Secrets and variables → Actions**, create the
 | --- | --- |
 | `AWS_REGION` | Target AWS region, for example `us-east-1` |
 | `TF_STATE_BUCKET` | The `state_bucket_name` from the bootstrap output |
+| `AWS_GITHUB_ACTIONS_ROLE_ARN` | The `github_actions_role_arn` from the bootstrap output |
 
-Create these **repository secrets** for the IAM principal that manages the environment:
-
-| Secret | Value |
-| --- | --- |
-| `AWS_ACCESS_KEY_ID` | IAM access key ID |
-| `AWS_SECRET_ACCESS_KEY` | Matching IAM secret access key |
-
-`TF_STATE_KEY` is defined in the workflow source as `distributed-job-processing-system/dev/terraform.tfstate`; do not create it in GitHub settings.
+The workflows assume the `AWS_GITHUB_ACTIONS_ROLE_ARN` through GitHub OIDC. Do not create `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` repository secrets. `TF_STATE_KEY` is defined in the workflow source as `distributed-job-processing-system/dev/terraform.tfstate`; do not create it in GitHub settings.
 
 ### 3. Migrate Existing Local State Once
 
@@ -188,4 +182,4 @@ The workflows are manual and use one shared concurrency group, so deploy and des
 - **Deploy EKS Environment** provisions the Terraform stack, publishes commit-SHA-tagged images, deploys the application, and reports the ingress endpoint.
 - **Destroy EKS Environment** requires the exact confirmation value `DESTROY`, then removes the application and all Terraform-managed EKS resources.
 
-The IAM principal must be limited to the intended AWS account and permitted to manage the Terraform-created EKS, EC2/VPC, ECR, IAM, CloudWatch, and S3-state resources. Rotate these long-lived keys regularly. The workflow never prints secret values.
+The OIDC role is restricted to GitHub Actions runs from the repository's `main` branch and is granted the AWS actions required for this Terraform-managed environment. The workflow uses short-lived AWS credentials and does not require stored AWS access keys.
