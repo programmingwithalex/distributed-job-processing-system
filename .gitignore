@@ -210,8 +210,13 @@ infra/terraform/.terraform/
 infra/terraform/terraform.tfstate  # record of the current state of the infrastructure
 infra/terraform/terraform.tfstate.*
 infra/terraform/terraform.tfvars
+infra/terraform/backend.hcl
 infra/terraform/*.tfplan
 infra/terraform/crash.log
+infra/terraform/bootstrap/.terraform/
+infra/terraform/bootstrap/terraform.tfstate
+infra/terraform/bootstrap/terraform.tfstate.*
+infra/terraform/bootstrap/terraform.tfvars
 
 # Marimo
 marimo/_static/

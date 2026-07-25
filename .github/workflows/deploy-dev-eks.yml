@@ -1,0 +1,110 @@
+name: Deploy EKS Environment
+
+# deploy infrastructure and application code only when an operator dispatches this workflow
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to deploy
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+  # ---------------------------------------------------------------------------
+  # github oidc: request a token so aws can issue short-lived role credentials
+  # this replaces AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY repository secrets
+  # inspect the role trust in aws iam → dist-jobs-github-actions → trust relationships
+  # ---------------------------------------------------------------------------
+  # request a short-lived OIDC token for AWS role assumption instead of stored keys
+  id-token: write
+
+concurrency:
+  # serialize deployment and destruction against the same Terraform state
+  group: eks-environment-lifecycle
+  cancel-in-progress: false
+
+env:
+  # state bucket is a repository variable because it is account-specific but not secret
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  # role created by the Terraform bootstrap configuration and trusted by AWS for this repository
+  AWS_GITHUB_ACTIONS_ROLE_ARN: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  TF_STATE_KEY: distributed-job-processing-system/dev/terraform.tfstate
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # exchange the GitHub OIDC token for short-lived AWS credentials
+          role-to-assume: ${{ env.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - uses: azure/setup-kubectl@v4
+
+      - name: Validate AWS identity and backend settings
+        run: |
+          test -n "$TF_STATE_BUCKET"
+          test -n "$AWS_GITHUB_ACTIONS_ROLE_ARN"
+          aws sts get-caller-identity
+
+      - name: Initialize Terraform state
+        run: |
+          # S3 versioning and native lockfiles coordinate state access across workflow runs
+          terraform -chdir=infra/terraform init -input=false \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=$TF_STATE_KEY" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      - name: Validate and provision AWS infrastructure
+        run: |
+          terraform -chdir=infra/terraform fmt -check -recursive
+          terraform -chdir=infra/terraform validate
+          terraform -chdir=infra/terraform plan -input=false -out=tfplan
+          terraform -chdir=infra/terraform apply -input=false -auto-approve tfplan
+
+      - name: Verify provisioned resources
+        run: bash infra/terraform/verify-resources.sh
+
+      - name: Deploy application stack
+        env:
+          # tie every pushed image to the exact commit selected for this dispatch
+          IMAGE_TAG: ${{ github.sha }}
+        run: bash infra/k8s/overlays/eks/deploy-eks-application-stack.sh
+
+      - name: Verify application endpoint
+        id: ingress
+        run: |
+          # AWS assigns the ingress hostname asynchronously after controller rollout
+          ingress_host="$(kubectl get service ingress-nginx-controller --namespace ingress-nginx --output jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+          test -n "$ingress_host"
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error "http://${ingress_host}/api/health"; then
+              echo "host=$ingress_host" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Write deployment summary
+        run: |
+          {
+            echo "## EKS deployment"
+            echo
+            echo "- Cluster: \`dist-jobs\`"
+            echo "- Image tag: \`${GITHUB_SHA}\`"
+            echo "- Endpoint: http://${{ steps.ingress.outputs.host }}/"
+          } >> "$GITHUB_STEP_SUMMARY"

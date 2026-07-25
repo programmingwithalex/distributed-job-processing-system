@@ -5,8 +5,6 @@ Before applying the EKS overlay, publish the three application images to Amazon 
 Quick start:
 
 ```bash
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-
 bash infra/k8s/overlays/eks/publish-images.sh
 ```
 
@@ -44,7 +42,7 @@ Run the helper from a Bash shell such as WSL:
 bash infra/k8s/overlays/eks/publish-images.sh
 ```
 
-Use a new image tag for each publish (for example `v2`, `v3`, or a git-sha-like tag).
+The script uses the current Git commit's short SHA as its image tag. Supply `IMAGE_TAG` only when using another immutable identifier.
 
 The script will:
 
@@ -61,7 +59,7 @@ The script will:
 ```bash
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 AWS_REGION=us-east-1
-IMAGE_TAG=v1
+IMAGE_TAG=$(git rev-parse --short=12 HEAD)
 ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 CLUSTER_NAME=dist-jobs
 
