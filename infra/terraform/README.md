@@ -42,7 +42,9 @@ terraform -chdir=infra/terraform/bootstrap apply
 
 Record the `state_bucket_name` output. Its random suffix only guarantees global S3 name uniqueness; the name remains stable after creation and is reused for all future EKS lifecycle operations.
 
-### 2. Configure GitHub Actions Once
+### 2. Configure GitHub Actions OIDC Once
+
+GitHub Actions authenticates to AWS through OpenID Connect (OIDC). Each workflow run exchanges its GitHub-issued identity token for short-lived credentials to assume the Terraform-created IAM role. No long-lived AWS access keys are stored in GitHub.
 
 In the repository **Settings → Secrets and variables → Actions**, create these **repository variables**:
 

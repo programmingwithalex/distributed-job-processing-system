@@ -4,7 +4,7 @@ This configuration creates the persistent S3 bucket used by the EKS stack. It in
 
 The generated bucket suffix ensures global S3 name uniqueness only. After bootstrap apply, the resulting `state_bucket_name` is stable and should be saved as the `TF_STATE_BUCKET` GitHub repository variable. Normal EKS teardown and recreation reuse the same bucket, so this variable does not need to be changed between environment lifecycles.
 
-Bootstrap also creates a GitHub OIDC provider and the `dist-jobs-github-actions` IAM role. Save the `github_actions_role_arn` output as the `AWS_GITHUB_ACTIONS_ROLE_ARN` GitHub repository variable. The role trust policy only permits runs from `programmingwithalex/distributed-job-processing-system` on the `main` branch, and Actions receives short-lived credentials without stored AWS access keys.
+Bootstrap also creates the GitHub OIDC provider and the `dist-jobs-github-actions` IAM role. GitHub Actions presents an identity token to AWS, which exchanges it for short-lived credentials scoped to this role. Save the `github_actions_role_arn` output as the `AWS_GITHUB_ACTIONS_ROLE_ARN` GitHub repository variable. The role trust policy only permits runs from `programmingwithalex/distributed-job-processing-system` on the `main` branch, and Actions does not use stored AWS access keys.
 
 For the complete operator checklist, including GitHub Actions configuration and state migration, use [../README.md](../README.md#team-environment-setup-and-operations).
 
