@@ -233,6 +233,7 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
       "eks:DescribeUpdate",
       "eks:DisassociateAccessPolicy",
       "eks:ListAddons",
+      "eks:ListAssociatedAccessPolicies",
       "eks:ListNodegroups",
       "eks:ListTagsForResource",
       "eks:TagResource",
