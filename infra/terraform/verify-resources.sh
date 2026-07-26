@@ -42,11 +42,6 @@ require_command terraform
 require_command aws
 require_command python3
 
-if [[ ! -f "$TERRAFORM_DIR/terraform.tfstate" ]]; then
-  echo "No terraform state file was found under '$TERRAFORM_DIR'. Run terraform apply first." >&2
-  exit 1
-fi
-
 failures=()
 
 region="$(terraform_output_raw aws_region)"
