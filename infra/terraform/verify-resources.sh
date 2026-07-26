@@ -108,7 +108,7 @@ mapfile -t repository_records < <(
     python3 -c 'import json, sys
 data = json.load(sys.stdin)
 for _, url in sorted(data.items()):
-    print(f"{url.rsplit('/', 1)[-1]}|{url}")'
+  print(f"{url.rsplit(chr(47), 1)[-1]}|{url}")'
 )
 
 if (( ${#repository_records[@]} == 0 )); then
