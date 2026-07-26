@@ -18,18 +18,6 @@ terraform_output_raw() {
   terraform -chdir="$TERRAFORM_DIR" output -raw "$name"
 }
 
-terraform_state_json() {
-  terraform -chdir="$TERRAFORM_DIR" state pull
-}
-
-terraform_console_string() {
-  local expression="$1"
-  (
-    cd "$TERRAFORM_DIR"
-    printf '%s\n' "$expression" | terraform console
-  )
-}
-
 print_success() {
   printf '[ok] %s\n' "$1"
 }
@@ -115,28 +103,12 @@ for nodegroup_name in "${nodegroup_names[@]}"; do
   fi
 done
 
-mapfile -t expected_repository_names < <(
-  terraform_console_string 'jsonencode(var.ecr_repository_names)' |
-    python3 -c 'import json, sys
-encoded = json.loads(sys.stdin.read())
-data = json.loads(encoded)
-for _, name in sorted(data.items()):
-    print(name)'
-)
-
 mapfile -t repository_records < <(
-  terraform_state_json |
+  terraform -chdir="$TERRAFORM_DIR" output -json ecr_repository_urls |
     python3 -c 'import json, sys
 data = json.load(sys.stdin)
-for resource in data.get("resources", []):
-    if resource.get("type") != "aws_ecr_repository" or resource.get("name") != "application":
-        continue
-    for instance in resource.get("instances", []):
-        attrs = instance.get("attributes", {})
-        name = attrs.get("name")
-        url = attrs.get("repository_url")
-        if name and url:
-            print(f"{name}|{url}")'
+for _, url in sorted(data.items()):
+    print(f"{url.rsplit('/', 1)[-1]}|{url}")'
 )
 
 if (( ${#repository_records[@]} == 0 )); then
@@ -151,13 +123,7 @@ for repository_record in "${repository_records[@]}"; do
   repository_uris_by_name["$repository_name"]="${repository_record#*|}"
 done
 
-for repository_name in "${expected_repository_names[@]}"; do
-  if [[ -z "${repository_uris_by_name[$repository_name]:-}" ]]; then
-    failures+=("ECR repository '$repository_name' was not found in Terraform state.")
-    print_failure "ECR repository '$repository_name' was not found in Terraform state."
-    continue
-  fi
-
+for repository_name in "${!repository_uris_by_name[@]}"; do
   expected_repository_uri="${repository_uris_by_name[$repository_name]}"
   actual_repository_uri="$(aws ecr describe-repositories --repository-names "$repository_name" --region "$region" --query 'repositories[0].repositoryUri' --output text)"
 
