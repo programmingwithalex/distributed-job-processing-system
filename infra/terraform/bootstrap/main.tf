@@ -98,10 +98,13 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
     }
 
     condition {
-      # restrict role assumption to workflow runs from the configured repository branch
-      test     = "StringEquals"
+      # permit the protected main branch and repository-scoped feature branches
+      test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/${var.github_actions_branch}"]
+      values = [
+        "repo:${var.github_repository}:ref:refs/heads/${var.github_actions_branch}",
+        "repo:${var.github_repository}:ref:refs/heads/feat/*",
+      ]
     }
   }
 }
@@ -223,6 +226,8 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
       "eks:DeleteCluster",
       "eks:DeleteNodegroup",
       "eks:DescribeAddon",
+      "eks:DescribeAddonVersions",
+      "eks:DescribeAccessEntry",
       "eks:DescribeCluster",
       "eks:DescribeNodegroup",
       "eks:DescribeUpdate",
