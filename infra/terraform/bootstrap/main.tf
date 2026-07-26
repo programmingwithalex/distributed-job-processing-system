@@ -158,6 +158,7 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
       "ecr:InitiateLayerUpload",
       "ecr:ListImages",
       "ecr:PutImage",
+      "ecr:PutImageScanningConfiguration",
       "ecr:TagResource",
       "ecr:UntagResource",
       "ecr:UploadLayerPart",
