@@ -282,6 +282,7 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
       "logs:DeleteLogGroup",
       "logs:DescribeLogGroups",
       "logs:ListTagsForResource",
+      "logs:PutRetentionPolicy",
       "logs:TagResource",
       "logs:UntagResource",
       "elasticloadbalancing:DescribeLoadBalancers",
