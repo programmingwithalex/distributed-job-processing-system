@@ -10,8 +10,36 @@ module "eks" {
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 
-  # grant the terraform caller initial cluster-admin access for post-provisioning setup
-  enable_cluster_creator_admin_permissions = true
+  # declare stable cluster administrators instead of deriving access from the Terraform caller
+  enable_cluster_creator_admin_permissions = false
+
+  access_entries = {
+    administrator = {
+      principal_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/admin"
+
+      policy_associations = {
+        cluster_admin = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
+
+    github_actions = {
+      principal_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/dist-jobs-github-actions"
+
+      policy_associations = {
+        cluster_admin = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
+  }
 
   # install the baseline EKS-managed addons instead of configuring them manually after cluster creation
   cluster_addons = {

@@ -98,10 +98,13 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
     }
 
     condition {
-      # restrict role assumption to workflow runs from the configured repository branch
-      test     = "StringEquals"
+      # permit the protected main branch and repository-scoped feature branches
+      test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/${var.github_actions_branch}"]
+      values = [
+        "repo:${var.github_repository}:ref:refs/heads/${var.github_actions_branch}",
+        "repo:${var.github_repository}:ref:refs/heads/feat/*",
+      ]
     }
   }
 }
@@ -207,12 +210,14 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
       "ec2:DeleteVpc",
       "ec2:Describe*",
       "ec2:DetachInternetGateway",
+      "ec2:DisassociateAddress",
       "ec2:DisassociateRouteTable",
       "ec2:ModifySubnetAttribute",
       "ec2:ModifyVpcAttribute",
       "ec2:ReleaseAddress",
       "ec2:RevokeSecurityGroupEgress",
       "ec2:RevokeSecurityGroupIngress",
+      "ec2:RunInstances",
       "eks:AssociateAccessPolicy",
       "eks:CreateAccessEntry",
       "eks:CreateAddon",
@@ -223,11 +228,14 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
       "eks:DeleteCluster",
       "eks:DeleteNodegroup",
       "eks:DescribeAddon",
+      "eks:DescribeAddonVersions",
+      "eks:DescribeAccessEntry",
       "eks:DescribeCluster",
       "eks:DescribeNodegroup",
       "eks:DescribeUpdate",
       "eks:DisassociateAccessPolicy",
       "eks:ListAddons",
+      "eks:ListAssociatedAccessPolicies",
       "eks:ListNodegroups",
       "eks:ListTagsForResource",
       "eks:TagResource",
@@ -246,6 +254,7 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
       "iam:GetPolicyVersion",
       "iam:GetRole",
       "iam:ListAttachedRolePolicies",
+      "iam:ListInstanceProfilesForRole",
       "iam:ListPolicyVersions",
       "iam:ListRolePolicies",
       "iam:PassRole",
@@ -258,6 +267,7 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
       "iam:UpdateAssumeRolePolicy",
       "kms:CreateAlias",
       "kms:CreateKey",
+      "kms:DeleteAlias",
       "kms:DescribeKey",
       "kms:DisableKey",
       "kms:EnableKeyRotation",
@@ -273,6 +283,7 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
       "logs:DeleteLogGroup",
       "logs:DescribeLogGroups",
       "logs:ListTagsForResource",
+      "logs:PutRetentionPolicy",
       "logs:TagResource",
       "logs:UntagResource",
       "elasticloadbalancing:DescribeLoadBalancers",
