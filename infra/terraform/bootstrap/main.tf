@@ -217,6 +217,7 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
       "ec2:ReleaseAddress",
       "ec2:RevokeSecurityGroupEgress",
       "ec2:RevokeSecurityGroupIngress",
+      "ec2:RunInstances",
       "eks:AssociateAccessPolicy",
       "eks:CreateAccessEntry",
       "eks:CreateAddon",
