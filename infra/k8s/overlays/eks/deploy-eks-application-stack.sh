@@ -5,6 +5,9 @@ set -euo pipefail
 AWS_REGION="${AWS_REGION:-us-east-1}"
 CLUSTER_NAME="${CLUSTER_NAME:-dist-jobs}"
 NAMESPACE="${NAMESPACE:-dist-jobs}"
+MONITORING_NAMESPACE="${MONITORING_NAMESPACE:-monitoring}"
+MONITORING_RELEASE="${MONITORING_RELEASE:-monitoring}"
+MONITORING_CHART_VERSION="87.21.0"
 INGRESS_NGINX_MANIFEST="https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
@@ -37,6 +40,7 @@ create_application_secret() {
 }
 
 require_command aws
+require_command helm
 require_command kubectl
 require_command openssl
 require_command bash
@@ -47,6 +51,16 @@ aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
 echo "installing ingress-nginx"
 kubectl apply -f "$INGRESS_NGINX_MANIFEST"
 kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=300s
+
+echo "installing monitoring stack"
+helm upgrade --install "$MONITORING_RELEASE" oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack \
+  --namespace "$MONITORING_NAMESPACE" \
+  --create-namespace \
+  --version "$MONITORING_CHART_VERSION" \
+  --values "$repo_root/infra/k8s/overlays/eks/monitoring/values.yaml" \
+  --atomic \
+  --wait \
+  --timeout 10m
 
 echo "creating namespace ${NAMESPACE}"
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
@@ -67,6 +81,10 @@ done
 
 echo "application stack deployed"
 kubectl get pods,services,ingress --namespace "$NAMESPACE"
+
+echo "monitoring stack deployed"
+helm status "$MONITORING_RELEASE" --namespace "$MONITORING_NAMESPACE"
+kubectl get pods,services --namespace "$MONITORING_NAMESPACE"
 
 echo "ingress endpoint"
 kubectl get service ingress-nginx-controller \
