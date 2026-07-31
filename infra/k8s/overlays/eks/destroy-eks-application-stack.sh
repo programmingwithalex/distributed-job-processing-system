@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# EKS recreation changes its API endpoint; this script refreshes kubeconfig below.
+# For manual kubectl or helm access after redeployment, rerun:
+# aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
+
 set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
