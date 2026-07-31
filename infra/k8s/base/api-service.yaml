@@ -4,6 +4,8 @@ kind: Service
 metadata:
   # service object name inside kubernetes
   name: api
+  labels:
+    app: api
 spec:
   selector:
     # select pods labeled as the api workload

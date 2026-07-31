@@ -20,6 +20,35 @@ bash infra/k8s/overlays/eks/deploy-eks-application-stack.sh
 
 The script updates kubeconfig, installs ingress-nginx, creates the namespace and application secret when absent, publishes images to ECR, applies the EKS overlay, and waits for workload rollouts. It preserves an existing `application-secrets` Secret so rerunning it does not rotate database credentials.
 
+## Monitoring
+
+The Git-provisioned `Distributed Jobs API` Grafana dashboard is defined in [monitoring/api-grafana-dashboard.yaml](./monitoring/api-grafana-dashboard.yaml). Its **p95 Request Duration** panel estimates the request duration at or below which 95% of API requests completed during the rolling five-minute window. For example, a result of `0.5 s` means approximately 95% of observed requests completed in 500 ms or less.
+
+The panel queries the API duration histogram with:
+
+```promql
+histogram_quantile(
+	0.95,
+	sum by (le) (rate(api_http_request_duration_seconds_bucket[5m]))
+)
+```
+
+It aggregates all API routes, methods, and status codes into one whole-API latency signal. Use the dashboard's route-level request and error-rate panels to investigate a latency change by endpoint.
+
+### Access Grafana
+
+Grafana has no public ingress. Retrieve its generated `admin` password, then keep the following port-forward process running while you access [http://localhost:3000](http://localhost:3000):
+
+```bash
+kubectl get secret monitoring-grafana --namespace monitoring \
+	--output jsonpath='{.data.admin-password}' | base64 --decode
+echo
+
+kubectl port-forward --namespace monitoring service/monitoring-grafana 3000:80
+```
+
+Sign in with username `admin`, then open the `Distributed Jobs API` dashboard. The `Healthy API Targets` panel should report at least `1` after Prometheus discovers the API ServiceMonitor.
+
 Teardown when you only want to remove the ECR repositories:
 
 ```bash
