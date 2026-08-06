@@ -4,9 +4,7 @@ kind: Kustomization
 namespace: dist-jobs
 resources:
   - ../../base
-  - monitoring/api-service-monitor.yaml
-  - monitoring/api-prometheus-rule.yaml
-  - monitoring/api-grafana-dashboard.yaml
+  - ../../monitoring
 
 # do not add secret.example.yaml here as a live resource
 # create an uncommitted secret.yaml from secret.example.yaml or create the

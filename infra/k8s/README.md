@@ -6,6 +6,7 @@ This directory contains the first local Kubernetes deployment for the project.
 
 - `base/` is the shared baseline manifest set for the application stack
 - `overlays/local/` adds local-only values on top of that shared baseline
+- `monitoring/` contains the shared API `ServiceMonitor`, alert rules, and Grafana dashboard
 - `base/` is named that way because the same common manifests can later be reused by `dev`, `qa`, and `prod` overlays
 
 ## Key ideas
@@ -15,6 +16,7 @@ This directory contains the first local Kubernetes deployment for the project.
 - in `k3d`, each node is implemented as a Docker container
 - `--agents 1` adds one worker node to the cluster in addition to the default control-plane node
 - `overlays/local/secret.yaml` provides the concrete secret values for local development
+- `overlays/local/monitoring-values.yaml` constrains the local Prometheus, Grafana, and Alertmanager resources
 
 ## Kustomize structure
 
@@ -38,9 +40,70 @@ This directory contains the first local Kubernetes deployment for the project.
 - in this repo, the project name defaults to the folder name `distributed-job-processing-system`
 - the service names come from `docker-compose.yml`, so names such as `distributed-job-processing-system-api:latest` are generated automatically
 
-## First local workflow
+## Local Application and Monitoring Workflow
 
-- use the following block as the complete end-to-end deployment flow from a Windows Terminal Ubuntu tab. It includes cluster cleanup, image build, cluster creation, image import, ingress installation, manifest apply, and verification commands:
+The preferred local deployment recreates the k3d cluster, deploys ingress-nginx and the pinned `kube-prometheus-stack` chart, then applies the application and shared monitoring manifests:
+
+```bash
+bash infra/k8s/overlays/local/deploy-local-stack.sh
+```
+
+The helper requires Docker, k3d, kubectl, and Helm. It installs the monitoring stack into the `monitoring` namespace and the application plus its `ServiceMonitor`, alert rules, and dashboard ConfigMap into `dist-jobs`.
+
+For local Grafana access after the helper completes:
+
+```bash
+kubectl port-forward --namespace monitoring service/monitoring-grafana 3000:80
+```
+
+Open <http://localhost:3000> and sign in with username `admin`. Retrieve the generated password with:
+
+```bash
+kubectl get secret monitoring-grafana --namespace monitoring \
+  --output jsonpath='{.data.admin-password}' | base64 --decode
+echo
+```
+
+For local Alertmanager access, use a second terminal:
+
+```bash
+kubectl port-forward --namespace monitoring service/monitoring-kube-prometheus-alertmanager 9093:9093
+```
+
+Open <http://localhost:9093> to inspect active alerts and their routing state.
+
+### Validate an API availability alert locally
+
+The `APIAllTargetsDown` rule normally waits five minutes before firing. To demonstrate the complete alert path locally without waiting five minutes, leave the Alertmanager port-forward running, then scale the API to zero:
+
+```bash
+kubectl scale deployment/api --namespace dist-jobs --replicas=0
+```
+
+Temporarily shorten only the live rule evaluation window to 30 seconds. This does not change the Git-managed manifest:
+
+```bash
+kubectl patch prometheusrule api --namespace dist-jobs \
+  --type=json \
+  --patch='[{"op":"replace","path":"/spec/groups/0/rules/0/for","value":"30s"}]'
+```
+
+After Prometheus completes a scrape and rule-evaluation cycle, refresh <http://localhost:9093>. The `APIAllTargetsDown` alert should appear with `severity="critical"` and `job="api"`.
+
+Restore the five-minute duration and the API deployment after the demonstration:
+
+```bash
+kubectl patch prometheusrule api --namespace dist-jobs \
+  --type=json \
+  --patch='[{"op":"replace","path":"/spec/groups/0/rules/0/for","value":"5m"}]'
+
+kubectl scale deployment/api --namespace dist-jobs --replicas=1
+kubectl rollout status deployment/api --namespace dist-jobs --timeout=300s
+```
+
+### Manual deployment
+
+Use the following block when you want the same flow as individual commands. It includes cluster cleanup, image build, cluster creation, image import, ingress installation, monitoring installation, manifest apply, and verification commands:
 
 ```bash
 k3d cluster delete distributed-jobs
@@ -61,9 +124,19 @@ k3d image import \
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
 kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=180s
 
+helm upgrade --install monitoring oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack \
+  --namespace monitoring \
+  --create-namespace \
+  --version 87.21.0 \
+  --values infra/k8s/overlays/local/monitoring-values.yaml \
+  --atomic \
+  --wait \
+  --timeout 10m
+
 kubectl apply -k infra/k8s/overlays/local
 
 kubectl get pods -n dist-jobs
+kubectl get pods -n monitoring
 kubectl get ingress -n dist-jobs
 
 curl http://localhost:8080/
@@ -71,6 +144,8 @@ curl http://localhost:8080/api/health
 ```
 
 - the steps below break out each subcommand from that full block and explain what it does.
+
+### Create the cluster
 
 - delete any existing local cluster first:
 
@@ -102,6 +177,8 @@ k3d cluster create distributed-jobs --agents 1 -p "8080:80@loadbalancer" --k3s-a
 k3d image import distributed-job-processing-system-api:latest distributed-job-processing-system-celery_worker:latest distributed-job-processing-system-frontend:latest -c distributed-jobs
 ```
 
+### Install platform services
+
 - install the ingress-nginx controller:
 
 ```bash
@@ -109,14 +186,33 @@ kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main
 kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=180s
 ```
 
+- install the local monitoring stack before applying the local overlay, because the overlay contains Prometheus Operator custom resources:
+
+```bash
+helm upgrade --install monitoring oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack \
+  --namespace monitoring \
+  --create-namespace \
+  --version 87.21.0 \
+  --values infra/k8s/overlays/local/monitoring-values.yaml \
+  --atomic \
+  --wait \
+  --timeout 10m
+```
+
+### Deploy the application
+
 - apply the local overlay:
 
 ```bash
 kubectl apply -k infra/k8s/overlays/local
 ```
 
+- the local overlay applies the shared API monitoring resources from `infra/k8s/monitoring/`. Prometheus discovers the API through the `ServiceMonitor`; Grafana discovers the dashboard ConfigMap through its dashboard sidecar.
+
 - the `deploy.yaml` file is the official upstream ingress-nginx install manifest published from the Kubernetes ingress-nginx repository
 - it creates the controller deployment plus the supporting namespace, RBAC, admission webhook, service accounts, and related resources needed to run ingress-nginx in the cluster
+
+### Verify the deployment
 
 - inspect the ingress resources:
 
@@ -128,6 +224,7 @@ kubectl get ingress -n dist-jobs
 
 ```bash
 kubectl get pods -n dist-jobs
+kubectl get pods -n monitoring
 ```
 
 - wait until the pods settle into `Running` before testing the app; the first startup can take a bit while containers initialize

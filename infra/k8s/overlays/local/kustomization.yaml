@@ -5,3 +5,4 @@ namespace: dist-jobs
 resources:
   - ../../base
   - secret.yaml
+  - ../../monitoring
