@@ -1,7 +1,9 @@
 name: Destroy EKS Environment
 
-# require an explicit operator dispatch before removing shared AWS infrastructure
+# scheduled workflows use UTC; 09:00 UTC is 04:00 EST
 on:
+  schedule:
+    - cron: '0 9 * * *'
   workflow_dispatch:
     inputs:
       confirmation:
@@ -34,8 +36,8 @@ env:
 
 jobs:
   destroy:
-    # protect the destructive operation with an exact confirmation value
-    if: inputs.confirmation == 'DESTROY'
+    # permit scheduled cleanup, but protect manual destruction with confirmation
+    if: github.event_name == 'schedule' || inputs.confirmation == 'DESTROY'
     runs-on: ubuntu-latest
 
     steps:
