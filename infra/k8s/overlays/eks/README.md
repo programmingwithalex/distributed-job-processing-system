@@ -54,7 +54,7 @@ flowchart LR
 3. The Prometheus Pod stores the scraped time series. Grafana queries those time series through its internal Prometheus datasource to render the dashboard panels. The browser sends dashboard requests only to Grafana; Grafana acts as a proxy and sends each PromQL query to the internal Prometheus Service, so the browser never connects to the Prometheus Pod directly.
 4. The Grafana Pod contains the Grafana container and a dashboard sidecar container. The sidecar watches labeled dashboard ConfigMaps, copies their JSON into Grafana's provisioning directory, and Grafana loads the dashboard definition.
 
-The Git-provisioned `Distributed Jobs API` Grafana dashboard is defined in [monitoring/api-grafana-dashboard.yaml](./monitoring/api-grafana-dashboard.yaml). Its **p95 Request Duration** panel estimates the request duration at or below which 95% of API requests completed during the rolling five-minute window. For example, a result of `0.5 s` means approximately 95% of observed requests completed in 500 ms or less.
+The Git-provisioned `Distributed Jobs API` Grafana dashboard is defined in [../../monitoring/api-grafana-dashboard.yaml](../../monitoring/api-grafana-dashboard.yaml). Its **p95 Request Duration** panel estimates the request duration at or below which 95% of API requests completed during the rolling five-minute window. For example, a result of `0.5 s` means approximately 95% of observed requests completed in 500 ms or less.
 
 The panel queries the API duration histogram with:
 
@@ -69,7 +69,7 @@ It aggregates all API routes, methods, and status codes into one whole-API laten
 
 ### Dashboard Provisioning
 
-Grafana dashboards are stored as Kubernetes ConfigMaps, so their definitions are version-controlled with the application manifests. The Grafana sidecar watches ConfigMaps in every namespace and provisions the dashboard JSON they contain. A typical setup uses one ConfigMap per dashboard, such as [monitoring/api-grafana-dashboard.yaml](./monitoring/api-grafana-dashboard.yaml).
+Grafana dashboards are stored as Kubernetes ConfigMaps, so their definitions are version-controlled with the application manifests. The Grafana sidecar watches ConfigMaps in every namespace and provisions the dashboard JSON they contain. A typical setup uses one ConfigMap per dashboard, such as [../../monitoring/api-grafana-dashboard.yaml](../../monitoring/api-grafana-dashboard.yaml).
 
 Every dashboard ConfigMap in this deployment must include the label configured for the sidecar:
 

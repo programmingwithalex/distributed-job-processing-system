@@ -107,7 +107,15 @@ The dashboard includes:
 
 ## Run on local Kubernetes with k3d
 
-Use the following block as the complete end-to-end deployment flow from a Windows Terminal Ubuntu tab. It includes cluster cleanup, image build, cluster creation, image import, ingress installation, manifest apply, and verification commands.
+Deploy the local application and monitoring stacks from a Windows Terminal Ubuntu tab with:
+
+```bash
+bash infra/k8s/overlays/local/deploy-local-stack.sh
+```
+
+The helper requires Docker, k3d, kubectl, and Helm. For the manual deployment flow and local Grafana access, see [infra/k8s/README.md](infra/k8s/README.md).
+
+The following block is the same deployment as individual commands:
 
 ```bash
 k3d cluster delete distributed-jobs
@@ -128,9 +136,19 @@ k3d image import \
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
 kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=180s
 
+helm upgrade --install monitoring oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack \
+  --namespace monitoring \
+  --create-namespace \
+  --version 87.21.0 \
+  --values infra/k8s/overlays/local/monitoring-values.yaml \
+  --atomic \
+  --wait \
+  --timeout 10m
+
 kubectl apply -k infra/k8s/overlays/local
 
 kubectl get pods -n dist-jobs
+kubectl get pods -n monitoring
 kubectl get ingress -n dist-jobs
 
 curl http://localhost:8080/
@@ -184,7 +202,20 @@ kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main
 kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=180s
 ```
 
-Apply the local overlay:
+Install the local monitoring stack before applying the local overlay, because the overlay includes Prometheus Operator custom resources:
+
+```bash
+helm upgrade --install monitoring oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack \
+  --namespace monitoring \
+  --create-namespace \
+  --version 87.21.0 \
+  --values infra/k8s/overlays/local/monitoring-values.yaml \
+  --atomic \
+  --wait \
+  --timeout 10m
+```
+
+Apply the local overlay, including its shared API monitoring resources:
 
 ```bash
 kubectl apply -k infra/k8s/overlays/local
@@ -194,6 +225,7 @@ Wait for the pods and inspect the ingress resources:
 
 ```bash
 kubectl get pods -n dist-jobs
+kubectl get pods -n monitoring
 kubectl get ingress -n dist-jobs
 ```
 
