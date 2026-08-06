@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 
+# EKS recreation changes its API endpoint; this script refreshes kubeconfig below.
+# For manual kubectl or helm access after redeployment, rerun:
+# aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
+
 set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
 CLUSTER_NAME="${CLUSTER_NAME:-dist-jobs}"
 NAMESPACE="${NAMESPACE:-dist-jobs}"
+MONITORING_NAMESPACE="${MONITORING_NAMESPACE:-monitoring}"
+MONITORING_RELEASE="${MONITORING_RELEASE:-monitoring}"
 TERRAFORM_VAR_FILE="${TERRAFORM_VAR_FILE:-terraform.tfvars}"
 INGRESS_NGINX_MANIFEST="https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml"
 
@@ -37,10 +43,20 @@ require_command aws
 require_command terraform
 
 if aws eks describe-cluster --region "$AWS_REGION" --name "$CLUSTER_NAME" >/dev/null 2>&1; then
+  require_command helm
   require_command kubectl
 
   echo "updating kubeconfig for ${CLUSTER_NAME}"
   aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
+
+  echo "uninstalling monitoring stack"
+  helm uninstall "$MONITORING_RELEASE" \
+    --namespace "$MONITORING_NAMESPACE" \
+    --ignore-not-found \
+    --wait \
+    --timeout 10m
+  kubectl delete namespace "$MONITORING_NAMESPACE" --ignore-not-found
+  wait_for_namespace_deletion "$MONITORING_NAMESPACE"
 
   echo "deleting application namespace ${NAMESPACE}"
   kubectl delete -k "$repo_root/infra/k8s/overlays/eks" --ignore-not-found
