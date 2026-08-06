@@ -8,7 +8,9 @@ This directory contains environment-specific Kubernetes configurations built on 
 overlays/
 ├── README.md
 ├── local/
+│   ├── deploy-local-stack.sh
 │   ├── kustomization.yaml
+│   ├── monitoring-values.yaml
 │   └── secret.yaml
 └── eks/
     ├── README.md
@@ -26,15 +28,15 @@ Each overlay customizes those base resources for a specific environment.
 
 ## Local Overlay
 
-The `local` overlay is used for running the system on a local `k3d` cluster.
+The `local` overlay is used for running the system on a local `k3d` cluster. Its deployment helper also installs the local Prometheus, Grafana, and Alertmanager stack.
 
-Apply it with:
+Deploy the full local stack with:
 
 ```bash
-kubectl apply -k infra/k8s/overlays/local
+bash infra/k8s/overlays/local/deploy-local-stack.sh
 ```
 
-This overlay is intended for local development and testing.
+The `kube-prometheus-stack` Helm release must be installed before applying the overlay directly, because the overlay includes `ServiceMonitor` and `PrometheusRule` custom resources.
 
 ## EKS Overlay
 
