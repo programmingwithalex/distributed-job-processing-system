@@ -51,6 +51,10 @@ jobs:
 
       - uses: azure/setup-kubectl@v4
 
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+
       - name: Validate AWS identity and backend settings
         run: |
           test -n "$TF_STATE_BUCKET"
