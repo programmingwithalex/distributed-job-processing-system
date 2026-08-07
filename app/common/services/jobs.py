@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import Select, select
@@ -5,7 +6,6 @@ from sqlalchemy.orm import Session
 
 from app.common.config import get_application_settings
 from app.common.models.job import JobRecord, JobStatus, JobType
-
 
 application_settings = get_application_settings()
 
@@ -126,7 +126,7 @@ def build_post_failure_job_status(job_record: JobRecord) -> JobStatus:
     if job_record_has_attempts_remaining(job_record=job_record):
         return JobStatus.QUEUED
 
-    return JobStatus.FAILED
+    return JobStatus.DEAD_LETTERED
 
 
 def mark_job_record_completed(
@@ -164,12 +164,12 @@ def mark_job_record_failed(
     return job_record
 
 
-def mark_job_record_queued_for_retry_or_failed(
+def mark_job_record_queued_for_retry_or_dead_lettered(
     database_session: Session,
     job_id: UUID,
     failure_message: str,
 ) -> JobRecord | None:
-    """Persist a failed attempt and either requeue the job or fail it terminally."""
+    """Persist a failed attempt and either requeue or dead-letter the job."""
     job_record = get_job_record_by_id(database_session=database_session, job_id=job_id)
     if job_record is None:
         return None
@@ -177,6 +177,9 @@ def mark_job_record_queued_for_retry_or_failed(
     job_record.status = build_post_failure_job_status(job_record=job_record)
     job_record.result = None
     job_record.error_message = failure_message
+    job_record.dead_lettered_at = (
+        datetime.now(UTC) if job_record.status == JobStatus.DEAD_LETTERED else None
+    )
     database_session.commit()
     database_session.refresh(job_record)
     return job_record
