@@ -8,6 +8,70 @@ permissions:
   contents: read
 
 jobs:
+  infrastructure:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - uses: azure/setup-kubectl@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check infrastructure formatting
+        run: |
+          terraform -chdir=infra/terraform fmt -check -recursive
+          npx --yes prettier@3.5.3 --check \
+            README.md \
+            infra/k8s/README.md \
+            infra/k8s/overlays/README.md \
+            infra/k8s/overlays/eks/README.md \
+            infra/k8s/monitoring/*.yaml \
+            infra/k8s/overlays/local/kustomization.yaml \
+            infra/k8s/overlays/local/local-monitoring-values.yaml \
+            infra/k8s/overlays/eks/kustomization.yaml
+
+      - name: Validate Terraform configuration
+        run: |
+          terraform -chdir=infra/terraform init -backend=false -input=false
+          terraform -chdir=infra/terraform validate
+
+      - name: Validate Kubernetes manifests
+        run: |
+          kubectl kustomize infra/k8s/overlays/local > /dev/null
+          kubectl kustomize infra/k8s/overlays/eks > /dev/null
+
+      # -n checks for syntax errors without executing the scripts
+      - name: Validate deployment scripts
+        run: |
+          bash -n infra/k8s/overlays/local/deploy-local-stack.sh
+          bash -n infra/k8s/overlays/eks/deploy-eks-application-stack.sh
+          bash -n infra/k8s/overlays/eks/destroy-eks-application-stack.sh
+          bash -n infra/k8s/overlays/eks/publish-images.sh
+
+      # validates both monitoring configurations can produce valid Kubernetes manifests from exact Helm chart deployed
+      # catches mistakes such as invalid YAML, invalid Helm value names or types, malformed templating inputs, and chart-version incompatibilities
+      # downloads pinned `kube-prometheus-stack` chart version 87.21.0 from GitHub Container Registry
+      # (1) local | (2) EKS
+      - name: Render monitoring chart values
+        run: |
+          helm template monitoring oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack \
+            --namespace monitoring \
+            --version 87.21.0 \
+            --values infra/k8s/overlays/local/local-monitoring-values.yaml > /dev/null
+          helm template monitoring oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack \
+            --namespace monitoring \
+            --version 87.21.0 \
+            --values infra/k8s/overlays/eks/monitoring/eks-monitoring-values.yaml > /dev/null
+
   # validate the FastAPI and worker code independently of browser tests
   backend:
     runs-on: ubuntu-latest
