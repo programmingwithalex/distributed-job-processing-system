@@ -140,7 +140,7 @@ helm upgrade --install monitoring oci://ghcr.io/prometheus-community/charts/kube
   --namespace monitoring \
   --create-namespace \
   --version 87.21.0 \
-  --values infra/k8s/overlays/local/monitoring-values.yaml \
+  --values infra/k8s/overlays/local/local-monitoring-values.yaml \
   --atomic \
   --wait \
   --timeout 10m
@@ -209,7 +209,7 @@ helm upgrade --install monitoring oci://ghcr.io/prometheus-community/charts/kube
   --namespace monitoring \
   --create-namespace \
   --version 87.21.0 \
-  --values infra/k8s/overlays/local/monitoring-values.yaml \
+  --values infra/k8s/overlays/local/local-monitoring-values.yaml \
   --atomic \
   --wait \
   --timeout 10m

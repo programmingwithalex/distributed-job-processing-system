@@ -51,7 +51,7 @@ helm upgrade --install "$MONITORING_RELEASE" oci://ghcr.io/prometheus-community/
   --namespace "$MONITORING_NAMESPACE" \
   --create-namespace \
   --version "$MONITORING_CHART_VERSION" \
-  --values "$repo_root/infra/k8s/overlays/local/monitoring-values.yaml" \
+  --values "$repo_root/infra/k8s/overlays/local/local-monitoring-values.yaml" \
   --atomic \
   --wait \
   --timeout 10m
