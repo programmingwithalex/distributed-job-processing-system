@@ -16,7 +16,7 @@ This directory contains the first local Kubernetes deployment for the project.
 - in `k3d`, each node is implemented as a Docker container
 - `--agents 1` adds one worker node to the cluster in addition to the default control-plane node
 - `overlays/local/secret.yaml` provides the concrete secret values for local development
-- `overlays/local/monitoring-values.yaml` constrains the local Prometheus, Grafana, and Alertmanager resources
+- `overlays/local/local-monitoring-values.yaml` constrains the local Prometheus, Grafana, and Alertmanager resources
 
 ## Kustomize structure
 
@@ -128,7 +128,7 @@ helm upgrade --install monitoring oci://ghcr.io/prometheus-community/charts/kube
   --namespace monitoring \
   --create-namespace \
   --version 87.21.0 \
-  --values infra/k8s/overlays/local/monitoring-values.yaml \
+  --values infra/k8s/overlays/local/local-monitoring-values.yaml \
   --atomic \
   --wait \
   --timeout 10m
@@ -193,7 +193,7 @@ helm upgrade --install monitoring oci://ghcr.io/prometheus-community/charts/kube
   --namespace monitoring \
   --create-namespace \
   --version 87.21.0 \
-  --values infra/k8s/overlays/local/monitoring-values.yaml \
+  --values infra/k8s/overlays/local/local-monitoring-values.yaml \
   --atomic \
   --wait \
   --timeout 10m
