@@ -16,6 +16,7 @@ class JobStatus(str, enum.Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+    DEAD_LETTERED = "dead_lettered"
 
 
 class JobType(str, enum.Enum):
@@ -55,6 +56,7 @@ class JobRecord(ORMBase):
     maximum_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dead_lettered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

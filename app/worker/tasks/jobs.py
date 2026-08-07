@@ -2,16 +2,15 @@ import logging
 import time
 from uuid import UUID
 
-from app.common.models.job import JobStatus, JobType
 from app.common.database import database_session_factory
 from app.common.logging import correlation_identifier_context_scope
+from app.common.models.job import JobStatus, JobType
 from app.common.services.jobs import (
     mark_job_record_completed,
     mark_job_record_processing,
-    mark_job_record_queued_for_retry_or_failed,
+    mark_job_record_queued_for_retry_or_dead_lettered,
 )
 from app.worker.celery_app import celery_app
-
 
 TRANSIENT_FAILURE_INPUT_PREFIX = "fail-once:"
 PERSISTENT_FAILURE_INPUT_PREFIX = "always-fail:"
@@ -81,7 +80,7 @@ def process_submitted_job(job_id: str) -> None:
             )
             logger.info("Completed job %s", job_record.id)
         except RuntimeError as processing_error:
-            updated_job_record = mark_job_record_queued_for_retry_or_failed(
+            updated_job_record = mark_job_record_queued_for_retry_or_dead_lettered(
                 database_session=database_session,
                 job_id=parsed_job_id,
                 failure_message=str(processing_error),

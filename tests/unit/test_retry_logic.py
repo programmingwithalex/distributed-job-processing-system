@@ -1,5 +1,12 @@
+from unittest.mock import MagicMock, patch
+from uuid import uuid4
+
 from app.common.models.job import JobRecord, JobStatus, JobType
-from app.common.services.jobs import build_post_failure_job_status, job_record_has_attempts_remaining
+from app.common.services.jobs import (
+    build_post_failure_job_status,
+    job_record_has_attempts_remaining,
+    mark_job_record_queued_for_retry_or_dead_lettered,
+)
 from app.worker.tasks.jobs import build_processed_result, transform_job_input
 
 
@@ -24,11 +31,46 @@ def test_job_record_has_attempts_remaining_returns_true_before_retry_budget_is_e
     assert job_record_has_attempts_remaining(job_record=job_record) is True
 
 
-def test_build_post_failure_job_status_returns_terminal_failure_when_retry_budget_is_exhausted() -> None:
-    """Verify failed jobs become terminal after the final allowed attempt."""
+def test_build_post_failure_job_status_returns_dead_lettered_when_retry_budget_is_exhausted() -> None:
+    """Verify exhausted jobs move to the dead-letter state."""
     job_record = build_job_record_for_retry_testing(attempt_count=3, maximum_attempt_count=3)
 
-    assert build_post_failure_job_status(job_record=job_record) == JobStatus.FAILED
+    assert build_post_failure_job_status(job_record=job_record) == JobStatus.DEAD_LETTERED
+
+
+def test_retryable_failure_does_not_set_dead_lettered_timestamp() -> None:
+    """Verify retryable jobs do not record a dead-letter transition time."""
+    job_record = build_job_record_for_retry_testing(attempt_count=1, maximum_attempt_count=3)
+    database_session = MagicMock()
+
+    with patch("app.common.services.jobs.get_job_record_by_id", return_value=job_record):
+        updated_job_record = mark_job_record_queued_for_retry_or_dead_lettered(
+            database_session=database_session,
+            job_id=uuid4(),
+            failure_message="transient failure",
+        )
+
+    assert updated_job_record is not None
+    assert updated_job_record.status == JobStatus.QUEUED
+    assert updated_job_record.dead_lettered_at is None
+
+
+def test_exhausted_failure_sets_dead_lettered_timestamp() -> None:
+    """Verify exhausted jobs record a timezone-aware dead-letter transition time."""
+    job_record = build_job_record_for_retry_testing(attempt_count=3, maximum_attempt_count=3)
+    database_session = MagicMock()
+
+    with patch("app.common.services.jobs.get_job_record_by_id", return_value=job_record):
+        updated_job_record = mark_job_record_queued_for_retry_or_dead_lettered(
+            database_session=database_session,
+            job_id=uuid4(),
+            failure_message="persistent failure",
+        )
+
+    assert updated_job_record is not None
+    assert updated_job_record.status == JobStatus.DEAD_LETTERED
+    assert updated_job_record.dead_lettered_at is not None
+    assert updated_job_record.dead_lettered_at.tzinfo is not None
 
 
 def test_build_processed_result_raises_for_transient_failure_on_first_attempt() -> None:
