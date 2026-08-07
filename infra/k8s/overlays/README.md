@@ -10,7 +10,7 @@ overlays/
 ├── local/
 │   ├── deploy-local-stack.sh
 │   ├── kustomization.yaml
-│   ├── monitoring-values.yaml
+│   ├── local-monitoring-values.yaml
 │   └── secret.yaml
 └── eks/
     ├── README.md
