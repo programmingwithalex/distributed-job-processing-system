@@ -1,3 +1,4 @@
+from inspect import ismethod
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -7,7 +8,12 @@ from app.common.services.jobs import (
     job_record_has_attempts_remaining,
     mark_job_record_queued_for_retry_or_dead_lettered,
 )
-from app.worker.tasks.jobs import build_processed_result, transform_job_input
+from app.worker.tasks.jobs import (
+    build_processed_result,
+    calculate_job_retry_delay_seconds,
+    process_submitted_job,
+    transform_job_input,
+)
 
 
 def build_job_record_for_retry_testing(
@@ -31,6 +37,83 @@ def build_job_record_for_retry_testing(
         attempt_count=attempt_count,
         maximum_attempt_count=maximum_attempt_count,
     )
+
+
+def test_process_submitted_job_is_bound_to_celery_task_instance() -> None:
+    """Verify Celery binds the registered task instance to the task implementation."""
+    assert ismethod(process_submitted_job.run)
+    assert callable(process_submitted_job.retry)
+
+
+def test_calculate_job_retry_delay_seconds_applies_bounded_exponential_backoff() -> None:
+    """Verify retry delays double from five seconds and stop increasing at sixty seconds."""
+    assert calculate_job_retry_delay_seconds(attempt_count=1) == 5
+    assert calculate_job_retry_delay_seconds(attempt_count=2) == 10
+    assert calculate_job_retry_delay_seconds(attempt_count=5) == 60
+    assert calculate_job_retry_delay_seconds(attempt_count=10) == 60
+
+
+def test_process_submitted_job_uses_celery_retry_when_job_remains_queued() -> None:
+    """Verify a retryable failure asks Celery to schedule the next attempt."""
+    database_session = MagicMock()
+    job_record = build_job_record_for_retry_testing(attempt_count=1, maximum_attempt_count=3)
+    processing_error = RuntimeError("transient failure")
+    celery_retry_signal = RuntimeError("celery retry requested")
+
+    with (
+        patch("app.worker.tasks.jobs.database_session_factory", return_value=database_session),
+        patch("app.worker.tasks.jobs.mark_job_record_processing", return_value=job_record),
+        patch("app.worker.tasks.jobs.build_processed_result", side_effect=processing_error),
+        patch(
+            "app.worker.tasks.jobs.mark_job_record_queued_for_retry_or_dead_lettered",
+            return_value=job_record,
+        ),
+        patch.object(
+            process_submitted_job,
+            "retry",
+            return_value=celery_retry_signal,
+        ) as retry_mock,
+    ):
+        try:
+            process_submitted_job.run(str(uuid4()))
+        except RuntimeError as raised_error:
+            assert raised_error is celery_retry_signal
+        else:
+            raise AssertionError("Expected the Celery retry signal")
+
+    retry_mock.assert_called_once_with(
+        exc=processing_error,
+        countdown=calculate_job_retry_delay_seconds(attempt_count=job_record.attempt_count),
+    )
+    database_session.close.assert_called_once_with()
+
+
+def test_process_submitted_job_does_not_retry_dead_lettered_job() -> None:
+    """Verify an exhausted failure is re-raised without scheduling another attempt."""
+    database_session = MagicMock()
+    job_record = build_job_record_for_retry_testing(attempt_count=3, maximum_attempt_count=3)
+    job_record.status = JobStatus.DEAD_LETTERED
+    processing_error = RuntimeError("persistent failure")
+
+    with (
+        patch("app.worker.tasks.jobs.database_session_factory", return_value=database_session),
+        patch("app.worker.tasks.jobs.mark_job_record_processing", return_value=job_record),
+        patch("app.worker.tasks.jobs.build_processed_result", side_effect=processing_error),
+        patch(
+            "app.worker.tasks.jobs.mark_job_record_queued_for_retry_or_dead_lettered",
+            return_value=job_record,
+        ),
+        patch.object(process_submitted_job, "retry") as retry_mock,
+    ):
+        try:
+            process_submitted_job.run(str(uuid4()))
+        except RuntimeError as raised_error:
+            assert raised_error is processing_error
+        else:
+            raise AssertionError("Expected the processing failure")
+
+    retry_mock.assert_not_called()
+    database_session.close.assert_called_once_with()
 
 
 def test_job_record_has_attempts_remaining_returns_true_before_retry_budget_is_exhausted() -> None:

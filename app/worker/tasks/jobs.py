@@ -2,6 +2,8 @@ import logging
 import time
 from uuid import UUID
 
+from celery import Task
+
 from app.common.database import database_session_factory
 from app.common.logging import correlation_identifier_context_scope
 from app.common.models.job import JobStatus, JobType
@@ -14,6 +16,8 @@ from app.worker.celery_app import celery_app
 
 TRANSIENT_FAILURE_INPUT_PREFIX = "fail-once:"
 PERSISTENT_FAILURE_INPUT_PREFIX = "always-fail:"
+JOB_RETRY_BASE_DELAY_SECONDS = 5
+JOB_RETRY_MAXIMUM_DELAY_SECONDS = 60
 logger = logging.getLogger(__name__)
 
 
@@ -40,6 +44,23 @@ def transform_job_input(input_value: str, job_type: JobType) -> str:
     raise RuntimeError(f"Unsupported job type: {job_type.value}")
 
 
+def calculate_job_retry_delay_seconds(attempt_count: int) -> int:
+    """
+    Calculate a bounded exponential delay from the persisted attempt count.
+
+    Args:
+        attempt_count: Current persisted processing attempt number
+
+    Returns:
+        Retry delay in seconds capped at the configured maximum
+    """
+    retry_exponent = max(attempt_count - 1, 0)
+    return min(
+        JOB_RETRY_BASE_DELAY_SECONDS * 2**retry_exponent,
+        JOB_RETRY_MAXIMUM_DELAY_SECONDS,
+    )
+
+
 def build_processed_result(input_value: str, job_type: JobType, attempt_count: int) -> str:
     """
     Build the processed result or raise a controlled failure for retry verification.
@@ -52,6 +73,7 @@ def build_processed_result(input_value: str, job_type: JobType, attempt_count: i
     Returns:
         Processed result value
     """
+    # simulate worker latency and deterministic failure modes for local verification
     time.sleep(2)
 
     if input_value.startswith(PERSISTENT_FAILURE_INPUT_PREFIX):
@@ -64,12 +86,22 @@ def build_processed_result(input_value: str, job_type: JobType, attempt_count: i
     return f"processed:{transformed_input_value}"
 
 
-@celery_app.task(name="app.worker.tasks.jobs.process_submitted_job")
-def process_submitted_job(job_id: str) -> None:
+@celery_app.task(
+    bind=True,
+    max_retries=None,
+    name="app.worker.tasks.jobs.process_submitted_job",
+)
+def process_submitted_job(self: Task, job_id: str) -> None:
     """
     Process a submitted job by updating its persisted lifecycle state.
 
+    PostgreSQL remains authoritative for the attempt count and whether another retry
+    is allowed. Celery supplies the bound task instance so retryable failures can use
+    `self.retry()` with bounded exponential backoff while preserving the task identity
+    and Celery retry metadata.
+
     Args:
+        self: Bound Celery task instance used to schedule retries
         job_id: String representation of the persisted job identifier
     """
     database_session = database_session_factory()
@@ -77,6 +109,7 @@ def process_submitted_job(job_id: str) -> None:
     correlation_identifier = f"job:{job_id}"
     with correlation_identifier_context_scope(correlation_identifier=correlation_identifier):
         try:
+            # persist the attempt before executing job logic
             job_record = mark_job_record_processing(
                 database_session=database_session,
                 job_id=parsed_job_id,
@@ -104,20 +137,28 @@ def process_submitted_job(job_id: str) -> None:
             )
             logger.info("Completed job %s", job_record.id)
         except RuntimeError as processing_error:
+            # let the persisted retry budget choose requeue or dead-letter state
             updated_job_record = mark_job_record_queued_for_retry_or_dead_lettered(
                 database_session=database_session,
                 job_id=parsed_job_id,
                 failure_message=str(processing_error),
             )
             if updated_job_record is not None and updated_job_record.status == JobStatus.QUEUED:
+                retry_delay_seconds = calculate_job_retry_delay_seconds(
+                    attempt_count=updated_job_record.attempt_count,
+                )
                 logger.warning(
-                    "Retrying job %s after attempt %s of %s failed",
+                    "Retrying job %s in %s seconds after attempt %s of %s failed",
                     updated_job_record.id,
+                    retry_delay_seconds,
                     updated_job_record.attempt_count,
                     updated_job_record.maximum_attempt_count,
                 )
-                process_submitted_job.delay(job_id)
-                return
+                # schedule bounded backoff while preserving Celery task identity
+                raise self.retry(
+                    exc=processing_error,
+                    countdown=retry_delay_seconds,
+                )
 
             logger.error("Job %s failed permanently", job_id)
             raise
