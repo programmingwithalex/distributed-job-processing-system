@@ -8,6 +8,11 @@ logger = logging.getLogger(__name__)
 
 @router.get("/health")
 def get_health_status() -> dict[str, str]:
-    """Return a simple health status payload for the API service."""
+    """
+    Return a simple health status payload for the API service.
+
+    Returns:
+        Health status payload
+    """
     logger.info("Handled API health check request")
     return {"status": "ok"}

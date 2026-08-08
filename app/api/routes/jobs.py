@@ -19,7 +19,16 @@ def submit_job(
     job_create_request: JobCreateRequest,
     database_session: Session = Depends(get_database_session),
 ) -> JobStatusResponse:
-    """Create a queued job record and dispatch it to the Celery worker."""
+    """
+    Create a queued job record and dispatch it to the Celery worker.
+
+    Args:
+        job_create_request: Validated job submission payload
+        database_session: Request-scoped SQLAlchemy session
+
+    Returns:
+        Persisted queued job metadata
+    """
     job_record = create_job_record(
         database_session=database_session,
         input_value=job_create_request.input_value,
@@ -41,7 +50,16 @@ def get_job_status_by_id(
     job_id: UUID,
     database_session: Session = Depends(get_database_session),
 ) -> JobStatusResponse:
-    """Return the current persisted status for a previously submitted job."""
+    """
+    Return the current persisted status for a previously submitted job.
+
+    Args:
+        job_id: Identifier of the job to retrieve
+        database_session: Request-scoped SQLAlchemy session
+
+    Returns:
+        Current persisted job metadata
+    """
     job_record = get_job_record_by_id(database_session=database_session, job_id=job_id)
     if job_record is None:
         logger.warning("Job %s was not found during status lookup", job_id)
@@ -58,7 +76,18 @@ def list_jobs(
     offset: int = Query(default=0, ge=0),
     database_session: Session = Depends(get_database_session),
 ) -> list[JobStatusResponse]:
-    """List persisted jobs with optional status filtering and pagination."""
+    """
+    List persisted jobs with optional status filtering and pagination.
+
+    Args:
+        status_filter: Optional status used to filter jobs
+        limit: Maximum number of jobs to return
+        offset: Number of jobs to skip
+        database_session: Request-scoped SQLAlchemy session
+
+    Returns:
+        Ordered job metadata matching the requested filters
+    """
     job_records = list_job_records(
         database_session=database_session,
         status_filter=status_filter,

@@ -27,5 +27,6 @@ class JobStatusResponse(BaseModel):
     maximum_attempt_count: int
     result: str | None
     error_message: str | None
+    dead_lettered_at: datetime | None
     created_at: datetime
     updated_at: datetime

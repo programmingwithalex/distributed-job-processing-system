@@ -24,7 +24,12 @@ database_session_factory = sessionmaker(
 
 
 def get_database_session() -> Generator[Session, None, None]:
-    """Yield a database session for request-scoped persistence work."""
+    """
+    Yield a database session for request-scoped persistence work.
+
+    Returns:
+        Generator that yields one SQLAlchemy session and closes it afterward
+    """
     database_session = database_session_factory()
     try:
         yield database_session

@@ -2,16 +2,15 @@ import logging
 import time
 from uuid import UUID
 
-from app.common.models.job import JobStatus, JobType
 from app.common.database import database_session_factory
 from app.common.logging import correlation_identifier_context_scope
+from app.common.models.job import JobStatus, JobType
 from app.common.services.jobs import (
     mark_job_record_completed,
     mark_job_record_processing,
-    mark_job_record_queued_for_retry_or_failed,
+    mark_job_record_queued_for_retry_or_dead_lettered,
 )
 from app.worker.celery_app import celery_app
-
 
 TRANSIENT_FAILURE_INPUT_PREFIX = "fail-once:"
 PERSISTENT_FAILURE_INPUT_PREFIX = "always-fail:"
@@ -19,7 +18,16 @@ logger = logging.getLogger(__name__)
 
 
 def transform_job_input(input_value: str, job_type: JobType) -> str:
-    """Transform the submitted input according to the requested job type."""
+    """
+    Transform the submitted input according to the requested job type.
+
+    Args:
+        input_value: Submitted value to transform
+        job_type: Processing behavior to apply
+
+    Returns:
+        Transformed input value
+    """
     if job_type == JobType.ECHO:
         return input_value
 
@@ -33,7 +41,17 @@ def transform_job_input(input_value: str, job_type: JobType) -> str:
 
 
 def build_processed_result(input_value: str, job_type: JobType, attempt_count: int) -> str:
-    """Build the processed result or raise a controlled failure for retry verification."""
+    """
+    Build the processed result or raise a controlled failure for retry verification.
+
+    Args:
+        input_value: Submitted value to process
+        job_type: Processing behavior to apply
+        attempt_count: Current persisted processing attempt number
+
+    Returns:
+        Processed result value
+    """
     time.sleep(2)
 
     if input_value.startswith(PERSISTENT_FAILURE_INPUT_PREFIX):
@@ -48,7 +66,12 @@ def build_processed_result(input_value: str, job_type: JobType, attempt_count: i
 
 @celery_app.task(name="app.worker.tasks.jobs.process_submitted_job")
 def process_submitted_job(job_id: str) -> None:
-    """Process a submitted job by updating its persisted lifecycle state."""
+    """
+    Process a submitted job by updating its persisted lifecycle state.
+
+    Args:
+        job_id: String representation of the persisted job identifier
+    """
     database_session = database_session_factory()
     parsed_job_id = UUID(job_id)
     correlation_identifier = f"job:{job_id}"
@@ -81,7 +104,7 @@ def process_submitted_job(job_id: str) -> None:
             )
             logger.info("Completed job %s", job_record.id)
         except RuntimeError as processing_error:
-            updated_job_record = mark_job_record_queued_for_retry_or_failed(
+            updated_job_record = mark_job_record_queued_for_retry_or_dead_lettered(
                 database_session=database_session,
                 job_id=parsed_job_id,
                 failure_message=str(processing_error),
