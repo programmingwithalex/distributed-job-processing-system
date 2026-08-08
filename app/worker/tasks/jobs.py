@@ -18,7 +18,16 @@ logger = logging.getLogger(__name__)
 
 
 def transform_job_input(input_value: str, job_type: JobType) -> str:
-    """Transform the submitted input according to the requested job type."""
+    """
+    Transform the submitted input according to the requested job type.
+
+    Args:
+        input_value: Submitted value to transform
+        job_type: Processing behavior to apply
+
+    Returns:
+        Transformed input value
+    """
     if job_type == JobType.ECHO:
         return input_value
 
@@ -32,7 +41,17 @@ def transform_job_input(input_value: str, job_type: JobType) -> str:
 
 
 def build_processed_result(input_value: str, job_type: JobType, attempt_count: int) -> str:
-    """Build the processed result or raise a controlled failure for retry verification."""
+    """
+    Build the processed result or raise a controlled failure for retry verification.
+
+    Args:
+        input_value: Submitted value to process
+        job_type: Processing behavior to apply
+        attempt_count: Current persisted processing attempt number
+
+    Returns:
+        Processed result value
+    """
     time.sleep(2)
 
     if input_value.startswith(PERSISTENT_FAILURE_INPUT_PREFIX):
@@ -47,7 +66,12 @@ def build_processed_result(input_value: str, job_type: JobType, attempt_count: i
 
 @celery_app.task(name="app.worker.tasks.jobs.process_submitted_job")
 def process_submitted_job(job_id: str) -> None:
-    """Process a submitted job by updating its persisted lifecycle state."""
+    """
+    Process a submitted job by updating its persisted lifecycle state.
+
+    Args:
+        job_id: String representation of the persisted job identifier
+    """
     database_session = database_session_factory()
     parsed_job_id = UUID(job_id)
     correlation_identifier = f"job:{job_id}"

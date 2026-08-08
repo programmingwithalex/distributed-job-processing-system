@@ -13,7 +13,8 @@ class FakeDatabaseSession:
         self.refresh_call_count = 0
 
     def add(self, database_object: object) -> None:
-        """Record a newly added ORM object.
+        """
+        Record a newly added ORM object.
 
         Args:
             database_object: ORM object being added to the fake session
@@ -25,7 +26,8 @@ class FakeDatabaseSession:
         self.commit_call_count += 1
 
     def refresh(self, database_object: object) -> None:
-        """Record that the fake session refreshed an ORM object.
+        """
+        Record that the fake session refreshed an ORM object.
 
         Args:
             database_object: ORM object being refreshed by the fake session
