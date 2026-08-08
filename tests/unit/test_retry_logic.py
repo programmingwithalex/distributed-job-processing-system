@@ -14,7 +14,16 @@ def build_job_record_for_retry_testing(
     attempt_count: int,
     maximum_attempt_count: int,
 ) -> JobRecord:
-    """Build an in-memory job record for retry unit tests."""
+    """
+    Build an in-memory job record for retry unit tests.
+
+    Args:
+        attempt_count: Current number of processing attempts
+        maximum_attempt_count: Maximum number of allowed processing attempts
+
+    Returns:
+        In-memory queued job record
+    """
     return JobRecord(
         input_value="retry-test",
         job_type=JobType.ECHO,

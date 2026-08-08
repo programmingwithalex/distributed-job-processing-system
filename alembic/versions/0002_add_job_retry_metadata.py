@@ -1,4 +1,5 @@
-"""add retry metadata to jobs table
+"""
+add retry metadata to jobs table
 
 Revision ID: 0002_add_job_retry_metadata
 Revises: 0001_create_jobs_table

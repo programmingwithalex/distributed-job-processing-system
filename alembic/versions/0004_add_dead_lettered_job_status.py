@@ -1,4 +1,5 @@
-"""add dead-lettered job status
+"""
+add dead-lettered job status
 
 Revision ID: 0004_add_dead_lettered_status
 Revises: 0003_add_job_type_to_jobs_table

@@ -23,5 +23,10 @@ class ApplicationSettings(BaseSettings):
 
 @lru_cache
 def get_application_settings() -> ApplicationSettings:
-    """Return the cached application settings instance."""
+    """
+    Return the cached application settings instance.
+
+    Returns:
+        Cached application settings
+    """
     return ApplicationSettings()

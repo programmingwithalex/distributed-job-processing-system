@@ -16,7 +16,8 @@ class CorrelationIdentifierFilter(logging.Filter):
     """Inject the current correlation identifier into log records."""
 
     def filter(self, log_record: logging.LogRecord) -> bool:
-        """Populate the correlation identifier field for a log record.
+        """
+        Populate the correlation identifier field for a log record.
 
         Args:
             log_record: Log record that will be emitted by the logger
@@ -31,7 +32,8 @@ class CorrelationIdentifierFilter(logging.Filter):
 def build_correlation_identifier_log_record_factory(
     existing_log_record_factory: Callable[..., logging.LogRecord],
 ) -> Callable[..., logging.LogRecord]:
-    """Wrap a log record factory so every record has a correlation identifier.
+    """
+    Wrap a log record factory so every record has a correlation identifier.
 
     Args:
         existing_log_record_factory: Existing logging factory that creates log records
@@ -41,7 +43,8 @@ def build_correlation_identifier_log_record_factory(
     """
 
     def correlation_identifier_log_record_factory(*args, **kwargs) -> logging.LogRecord:
-        """Create a log record enriched with the current correlation identifier.
+        """
+        Create a log record enriched with the current correlation identifier.
 
         Args:
             *args: Positional arguments forwarded to the standard record factory
@@ -86,13 +89,19 @@ def configure_application_logging() -> None:
 
 
 def generate_correlation_identifier() -> str:
-    """Generate a new correlation identifier for a request or task."""
+    """
+    Generate a new correlation identifier for a request or task.
+
+    Returns:
+        New correlation identifier
+    """
     return str(uuid4())
 
 
 @contextmanager
 def correlation_identifier_context_scope(correlation_identifier: str):
-    """Set the current correlation identifier for the duration of a scoped operation.
+    """
+    Set the current correlation identifier for the duration of a scoped operation.
 
     Args:
         correlation_identifier: Correlation identifier to expose in logs while the scope is active
