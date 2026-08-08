@@ -1,4 +1,5 @@
-"""add job type to jobs table
+"""
+add job type to jobs table
 
 Revision ID: 0003_add_job_type_to_jobs_table
 Revises: 0002_add_job_retry_metadata

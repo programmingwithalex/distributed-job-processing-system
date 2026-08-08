@@ -1,4 +1,5 @@
-"""create jobs table
+"""
+create jobs table
 
 Revision ID: 0001_create_jobs_table
 Revises:

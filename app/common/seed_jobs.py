@@ -35,7 +35,8 @@ class SeedJobDefinition:
 
 
 def build_seeded_job_identifier(job_slug: str) -> uuid.UUID:
-    """Build a deterministic UUID for a seeded job definition.
+    """
+    Build a deterministic UUID for a seeded job definition.
 
     Args:
         job_slug: Stable slug used to derive the seeded UUID
@@ -47,7 +48,8 @@ def build_seeded_job_identifier(job_slug: str) -> uuid.UUID:
 
 
 def build_seeded_timestamp(minute_offset: int) -> datetime:
-    """Build a deterministic UTC timestamp for seeded job rows.
+    """
+    Build a deterministic UTC timestamp for seeded job rows.
 
     Args:
         minute_offset: Offset in minutes from the shared seed reference timestamp
@@ -59,7 +61,8 @@ def build_seeded_timestamp(minute_offset: int) -> datetime:
 
 
 def build_seed_job_definitions() -> tuple[SeedJobDefinition, ...]:
-    """Return the deterministic seed dataset for the jobs table.
+    """
+    Return the deterministic seed dataset for the jobs table.
 
     Returns:
         Ordered immutable seeded job definitions
@@ -121,7 +124,8 @@ def seed_job_records(
     *,
     truncate_existing_records: bool,
 ) -> list[JobRecord]:
-    """Insert or refresh the deterministic job seed dataset.
+    """
+    Insert or refresh the deterministic job seed dataset.
 
     Args:
         database_session: SQLAlchemy session used for persistence work
@@ -169,7 +173,8 @@ def seed_job_records(
 
 
 def parse_command_line_arguments() -> argparse.Namespace:
-    """Parse command line arguments for the seed command.
+    """
+    Parse command line arguments for the seed command.
 
     Returns:
         Parsed command line namespace for seed execution

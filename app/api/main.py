@@ -27,7 +27,8 @@ API_HTTP_REQUEST_DURATION_SECONDS = Histogram(
 
 
 def get_metric_path_label(request: Request) -> str:
-    """Return a bounded path label from the resolved request route.
+    """
+    Return a bounded path label from the resolved request route.
 
     Args:
         request: Incoming Starlette request
@@ -43,7 +44,8 @@ class PrometheusMetricsMiddleware(BaseHTTPMiddleware):
     """Record bounded request metrics for application endpoints."""
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        """Process a request and publish its response metrics.
+        """
+        Process a request and publish its response metrics.
 
         Args:
             request: Incoming Starlette request
@@ -71,7 +73,8 @@ class CorrelationIdentifierMiddleware(BaseHTTPMiddleware):
     """Attach a correlation identifier to each API request and response."""
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        """Process a request while exposing a stable correlation identifier.
+        """
+        Process a request while exposing a stable correlation identifier.
 
         Args:
             request: Incoming Starlette request object
@@ -90,7 +93,12 @@ class CorrelationIdentifierMiddleware(BaseHTTPMiddleware):
 
 
 def create_api_application() -> FastAPI:
-    """Create and configure the FastAPI application for the API service."""
+    """
+    Create and configure the FastAPI application for the API service.
+
+    Returns:
+        Configured FastAPI application
+    """
     configure_application_logging()
     api_application = FastAPI(title="distributed-job-processing-system")
     api_application.add_middleware(CorrelationIdentifierMiddleware)
