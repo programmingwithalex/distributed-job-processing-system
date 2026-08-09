@@ -8,7 +8,11 @@ export interface SelectedJobStatusProperties {
   selectedJobRecord: JobStatusResponse | null;
   isLoadingSelectedJobRecord: boolean;
   selectedJobRecordErrorMessage: string | null;
+  isReplayingSelectedJob: boolean;
+  replayErrorMessage: string | null;
+  replaySuccessMessage: string | null;
   onReloadSelectedJobRecord: () => Promise<void>;
+  onReplaySelectedJob: () => Promise<void>;
 }
 
 
@@ -27,7 +31,11 @@ export function SelectedJobStatus({
   selectedJobRecord,
   isLoadingSelectedJobRecord,
   selectedJobRecordErrorMessage,
+  isReplayingSelectedJob,
+  replayErrorMessage,
+  replaySuccessMessage,
   onReloadSelectedJobRecord,
+  onReplaySelectedJob,
 }: SelectedJobStatusProperties): ReactElement {
   const selectedJobStatus = selectedJobRecord?.status ?? "queued";
 
@@ -39,14 +47,27 @@ export function SelectedJobStatus({
           <h2>Selected job signal</h2>
           <p className="section-copy section-copy--compact">Auto-refresh stays on until the job reaches a terminal state.</p>
         </div>
-        <button
-          className="secondary-button"
-          data-testid="selected-job-refresh-button"
-          type="button"
-          onClick={() => void onReloadSelectedJobRecord()}
-        >
-          Refresh now
-        </button>
+        <div className="toolbar-row">
+          {selectedJobRecord?.status === "dead_lettered" ? (
+            <button
+              className="primary-button"
+              data-testid="replay-job-button"
+              type="button"
+              disabled={isReplayingSelectedJob}
+              onClick={() => void onReplaySelectedJob()}
+            >
+              {isReplayingSelectedJob ? "Replaying..." : "Replay job"}
+            </button>
+          ) : null}
+          <button
+            className="secondary-button"
+            data-testid="selected-job-refresh-button"
+            type="button"
+            onClick={() => void onReloadSelectedJobRecord()}
+          >
+            Refresh now
+          </button>
+        </div>
       </div>
 
       {selectedJobIdentifier === null ? (
@@ -65,6 +86,14 @@ export function SelectedJobStatus({
 
       {selectedJobRecordErrorMessage !== null ? (
         <p className="status-banner status-banner--error">{selectedJobRecordErrorMessage}</p>
+      ) : null}
+
+      {replayErrorMessage !== null ? (
+        <p className="status-banner status-banner--error" data-testid="replay-error-message">{replayErrorMessage}</p>
+      ) : null}
+
+      {replaySuccessMessage !== null ? (
+        <p className="status-banner status-banner--success" data-testid="replay-success-message">{replaySuccessMessage}</p>
       ) : null}
 
       {selectedJobRecord !== null ? (
@@ -113,6 +142,13 @@ export function SelectedJobStatus({
               <p className="detail-label">Failure message</p>
               <pre data-testid="selected-job-failure-message">{selectedJobRecord.error_message ?? "No failure recorded"}</pre>
             </div>
+
+            {selectedJobRecord.replayed_from_job_id !== null ? (
+              <div className="detail-block detail-block--wide">
+                <p className="detail-label">Replayed from job</p>
+                <pre data-testid="selected-job-replayed-from">{selectedJobRecord.replayed_from_job_id}</pre>
+              </div>
+            ) : null}
           </div>
         </>
       ) : null}

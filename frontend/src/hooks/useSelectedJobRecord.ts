@@ -4,7 +4,7 @@ import { fetchJobRecord } from "../services/jobsApi";
 import type { JobStatus, JobStatusResponse } from "../types/jobs";
 
 
-const terminalJobStatuses: JobStatus[] = ["completed", "failed"];
+const terminalJobStatuses: JobStatus[] = ["completed", "failed", "dead_lettered"];
 const pollingIntervalMilliseconds = 2500;
 
 

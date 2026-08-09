@@ -63,6 +63,14 @@ export async function fetchJobRecord(
 }
 
 
+/** Replay a dead-lettered job and return the newly queued job record. */
+export async function replayJobRecord(jobIdentifier: string): Promise<JobStatusResponse> {
+  return fetchJson<JobStatusResponse>(buildApiUrl(`/jobs/${jobIdentifier}/replay`), {
+    method: "POST",
+  });
+}
+
+
 /** Retrieve a filtered list of persisted job records. */
 export async function listJobRecords(
   listJobRecordsOptions: ListJobRecordsOptions = {},

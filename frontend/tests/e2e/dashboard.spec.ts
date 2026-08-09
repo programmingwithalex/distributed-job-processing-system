@@ -10,6 +10,7 @@ interface CreatedJobRecord {
   input_value: string;
   job_type: string;
   status: string;
+  replayed_from_job_id: string | null;
 }
 
 
@@ -49,6 +50,28 @@ async function createJobRecordForTest(
 
   expect(createJobResponse.ok()).toBeTruthy();
   return (await createJobResponse.json()) as CreatedJobRecord;
+}
+
+
+/** Wait for the backend to persist the requested terminal job status. */
+async function waitForJobStatus(
+  request: APIRequestContext,
+  jobIdentifier: string,
+  expectedStatus: string,
+): Promise<CreatedJobRecord> {
+  for (let attemptNumber = 0; attemptNumber < 20; attemptNumber += 1) {
+    const jobStatusResponse = await request.get(`${apiBaseUrl}/jobs/${jobIdentifier}`);
+    expect(jobStatusResponse.ok()).toBeTruthy();
+    const jobRecord = (await jobStatusResponse.json()) as CreatedJobRecord;
+
+    if (jobRecord.status === expectedStatus) {
+      return jobRecord;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error(`Job ${jobIdentifier} never reached status ${expectedStatus}`);
 }
 
 
@@ -137,5 +160,33 @@ test.describe("queue desk dashboard", () => {
     await expect(selectedJobInputValue).toHaveText(expectedInputValue);
     await expect(selectedJobType).toHaveText("uppercase");
     await expect(selectedJobAttempts).toHaveText(/0 \/ 1|1 \/ 1/);
+  });
+
+  test("replays a dead-lettered job and focuses the linked replacement", async ({ page, request }) => {
+    const uniqueSuffix = `${Date.now()}-replay`;
+    const deadLetteredJobRecord = await createJobRecordForTest(
+      request,
+      `always-fail:e2e-${uniqueSuffix}`,
+      "echo",
+    );
+    await waitForJobStatus(request, deadLetteredJobRecord.id, "dead_lettered");
+
+    await page.goto("/");
+    await expectJobRowToAppear(page, deadLetteredJobRecord);
+    await getJobRow(page, deadLetteredJobRecord).click();
+
+    const selectedJobPanel = getSelectedJobPanel(page);
+    await expect(selectedJobPanel.getByTestId("selected-job-status")).toHaveText("dead_lettered");
+    const replayJobResponsePromise = page.waitForResponse(
+      (response) => response.request().method() === "POST" && response.url().endsWith(`/jobs/${deadLetteredJobRecord.id}/replay`),
+    );
+    await selectedJobPanel.getByTestId("replay-job-button").click();
+    const replayedJobRecord = (await (await replayJobResponsePromise).json()) as CreatedJobRecord;
+
+    await expect(selectedJobPanel.getByTestId("replay-success-message")).toContainText("Replay queued as");
+    await expect(selectedJobPanel.getByTestId("selected-job-id")).toHaveText(replayedJobRecord.id);
+    await expect(selectedJobPanel.getByTestId("selected-job-replayed-from")).toHaveText(
+      deadLetteredJobRecord.id,
+    );
   });
 });
