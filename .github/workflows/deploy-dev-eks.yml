@@ -42,6 +42,11 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
+      # workflow_dispatch may receive a moving branch or tag, so capture the exact checked-out commit
+      - name: Resolve deployment revision
+        id: revision
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           # exchange the GitHub OIDC token for short-lived AWS credentials
@@ -85,7 +90,8 @@ jobs:
       - name: Deploy application stack
         env:
           # tie every pushed image to the exact commit selected for this dispatch
-          IMAGE_TAG: ${{ github.sha }}
+          # the deploy summary and Kubernetes annotation use this same immutable revision
+          IMAGE_TAG: ${{ steps.revision.outputs.sha }}
         run: bash infra/k8s/overlays/eks/deploy-eks-application-stack.sh
 
       - name: Verify application endpoint
@@ -109,6 +115,6 @@ jobs:
             echo "## EKS deployment"
             echo
             echo "- Cluster: \`dist-jobs\`"
-            echo "- Image tag: \`${GITHUB_SHA}\`"
+            echo "- Image tag: \`${{ steps.revision.outputs.sha }}\`"
             echo "- Endpoint: http://${{ steps.ingress.outputs.host }}/"
           } >> "$GITHUB_STEP_SUMMARY"

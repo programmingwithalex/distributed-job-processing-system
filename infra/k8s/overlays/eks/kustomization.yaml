@@ -5,19 +5,24 @@ namespace: dist-jobs
 resources:
   - ../../base
   - ../../monitoring
+# the deploy script replaces this marker with the selected full Git commit SHA
+commonAnnotations:
+  distributed-jobs.dev/source-revision: deployment-placeholder
 
 # do not add secret.example.yaml here as a live resource
 # create an uncommitted secret.yaml from secret.example.yaml or create the
 # application-secrets Secret externally before deploying this overlay to EKS
+# 000000000000 is an account-neutral marker; the deploy script discovers the
+# authenticated AWS account ID and replaces these complete image references
 images:
   - name: distributed-job-processing-system-api:latest
-    newName: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-api
-    newTag: v1
+    newName: 000000000000.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-api
+    newTag: deployment-placeholder
   - name: distributed-job-processing-system-celery_worker:latest
-    newName: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-celery-worker
-    newTag: v1
+    newName: 000000000000.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-celery-worker
+    newTag: deployment-placeholder
   - name: distributed-job-processing-system-frontend:latest
-    newName: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-frontend
-    newTag: v1
+    newName: 000000000000.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-frontend
+    newTag: deployment-placeholder
 patches:
   - path: configmap-patch.yaml

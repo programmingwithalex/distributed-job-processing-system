@@ -155,7 +155,7 @@ Then publish images and deploy the application overlay:
 bash infra/k8s/overlays/eks/deploy-eks-application-stack.sh
 ```
 
-`publish-images.sh` assigns a Git commit SHA tag by default. Override `IMAGE_TAG` only with another immutable identifier.
+`publish-images.sh` assigns the current full Git commit SHA as its image tag. An explicit `IMAGE_TAG` must also be a full lowercase commit SHA. Existing images are reused, and ECR prevents a commit tag from being overwritten.
 
 ## Destroy Instructions
 
