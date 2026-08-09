@@ -25,6 +25,7 @@
   --status-processing: #0d6f96;
   --status-completed: #0b7a55;
   --status-failed: #9e3a34;
+  --status-dead-lettered: #7d3558;
 }
 
 * {
@@ -310,7 +311,8 @@ pre {
   transform: translateY(-1px);
 }
 
-.primary-button:disabled {
+.primary-button:disabled,
+.secondary-button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }
@@ -526,4 +528,14 @@ pre {
     transition: none !important;
     scroll-behavior: auto !important;
   }
+}
+
+.status-banner--success {
+  background: rgba(11, 122, 85, 0.12);
+  color: var(--status-completed);
+}
+
+.status-pill--dead_lettered {
+  background: rgba(125, 53, 88, 0.12);
+  color: var(--status-dead-lettered);
 }

@@ -5,7 +5,14 @@ import { listJobRecords } from "../services/jobsApi";
 import type { JobStatus, JobStatusResponse } from "../types/jobs";
 
 
-const availableStatusFilters: Array<JobStatus | "all"> = ["all", "queued", "processing", "completed", "failed"];
+const availableStatusFilters: Array<JobStatus | "all"> = [
+  "all",
+  "queued",
+  "processing",
+  "completed",
+  "failed",
+  "dead_lettered",
+];
 
 
 export interface JobRecordListProperties {

@@ -2,7 +2,7 @@
 export type JobType = "echo" | "reverse" | "uppercase";
 
 /** Enumerate the persisted job lifecycle states returned by the API. */
-export type JobStatus = "queued" | "processing" | "completed" | "failed";
+export type JobStatus = "queued" | "processing" | "completed" | "failed" | "dead_lettered";
 
 /** Describe the payload used to create a new job through the API. */
 export interface JobCreateRequestPayload {
@@ -21,6 +21,8 @@ export interface JobStatusResponse {
   maximum_attempt_count: number;
   result: string | null;
   error_message: string | null;
+  dead_lettered_at: string | null;
+  replayed_from_job_id: string | null;
   created_at: string;
   updated_at: string;
 }
