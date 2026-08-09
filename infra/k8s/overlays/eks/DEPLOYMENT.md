@@ -10,7 +10,6 @@ For this first pass, Postgres and RabbitMQ still run inside the cluster.
 - `eksctl` installed
 - `kubectl` installed
 - the API, Celery worker, and frontend images already pushed to ECR
-- [kustomization.yaml](./kustomization.yaml) updated to the correct ECR image URLs and tag
 
 ## Set Environment Variables
 
@@ -18,7 +17,7 @@ For this first pass, Postgres and RabbitMQ still run inside the cluster.
 CLUSTER_NAME=dist-jobs
 AWS_REGION=us-east-1
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-IMAGE_TAG=v1
+IMAGE_TAG=$(git rev-parse HEAD)
 ```
 
 ## Cost Warning
@@ -79,12 +78,21 @@ The helper runs the following steps in order:
 2. Applies the ingress-nginx cloud manifest and waits for the ingress controller deployment to become available.
 3. Creates the `dist-jobs` namespace idempotently.
 4. Creates `application-secrets` if it does not already exist, including a generated Postgres password and the application database and broker connection values. On later runs, it preserves the existing Secret to avoid rotating database credentials.
-5. Runs [publish-images.sh](./publish-images.sh), which builds the API, Celery worker, and frontend images, authenticates Docker to ECR, pushes the images, and updates [kustomization.yaml](./kustomization.yaml) with the ECR image references.
-6. Applies the EKS Kustomize overlay, rendering the shared base manifests with EKS-specific image and configuration overrides.
+5. Runs [publish-images.sh](./publish-images.sh), which builds and pushes any images missing for the selected full commit SHA and reuses immutable images that already exist.
+6. Copies the Kubernetes manifests to a temporary workspace, injects the ECR registry and commit SHA, and applies the rendered EKS overlay without modifying tracked files.
 7. Waits for Postgres, RabbitMQ, API, Celery worker, and frontend deployment rollouts to complete.
-8. Displays the application pods, Services, Ingress resources, and the ingress controller load balancer hostname for follow-up testing.
+8. Verifies that the API, Celery worker, and frontend Deployments reference the exact expected immutable images.
+9. Displays the application pods, Services, Ingress resources, and the ingress controller load balancer hostname for follow-up testing.
 
 The manual steps below remain available for troubleshooting or when individual control over each step is required.
+
+## Roll Back To A Published Commit
+
+Dispatch the `Deploy EKS Environment` workflow and set `ref` to a previously deployed full commit SHA. The workflow checks out that commit, reuses its existing immutable ECR images, applies those exact image references, and verifies the completed rollout.
+
+Normal deployments may use a branch, tag, or commit in `ref`; the workflow always resolves the checked-out ref to its full commit SHA before publishing. Use a full SHA for rollback so the selected release cannot move between dispatch and checkout.
+
+Only select a commit that was successfully published under the immutable-image delivery flow. ECR rejects overwriting an existing commit tag, so rollback uses the original artifacts rather than rebuilding them.
 
 ## Destroy The EKS Application Stack
 

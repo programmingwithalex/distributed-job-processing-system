@@ -8,7 +8,7 @@ Quick start:
 bash infra/k8s/overlays/eks/publish-images.sh
 ```
 
-Will also update `./kustomization.yaml` with ECR images after pushed.
+The script publishes images under the current commit's full SHA. It does not modify the tracked Kustomize overlay.
 
 For cluster creation, deployment, and EKS teardown, use [DEPLOYMENT.md](./DEPLOYMENT.md).
 
@@ -107,6 +107,7 @@ bash infra/k8s/overlays/eks/teardown-ecr-repos.sh "$AWS_ACCOUNT_ID" us-east-1
 - AWS CLI authenticated to the target AWS account
 - Docker running locally
 - permission to create and push to ECR repositories
+- `ecr:PutImageTagMutability` permission, provided to GitHub Actions by the current Terraform bootstrap policy
 
 ## One-Time Publishing Flow
 
@@ -116,30 +117,31 @@ Run the helper from a Bash shell such as WSL:
 bash infra/k8s/overlays/eks/publish-images.sh
 ```
 
-The script uses the current Git commit's short SHA as its image tag. Supply `IMAGE_TAG` only when using another immutable identifier.
+The script uses the current Git commit's full 40-character SHA as its image tag. `IMAGE_TAG` must also be a full lowercase commit SHA when supplied explicitly.
 
 The script will:
 
 - create the `distributed-job-processing-system-api` ECR repository if missing
 - create the `distributed-job-processing-system-celery-worker` ECR repository if missing
 - create the `distributed-job-processing-system-frontend` ECR repository if missing
+- enforce immutable tags on all three repositories
+- reuse any images already published for the selected commit
 - authenticate Docker to ECR
 - build the `api`, `celery_worker`, and `frontend` images with Docker Compose
 - tag and push those images to ECR
-- update [kustomization.yaml](./kustomization.yaml) with the ECR image URLs and tag
 
 ## Equivalent Manual Commands
 
 ```bash
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 AWS_REGION=us-east-1
-IMAGE_TAG=$(git rev-parse --short=12 HEAD)
+IMAGE_TAG=$(git rev-parse HEAD)
 ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 CLUSTER_NAME=dist-jobs
 
-aws ecr create-repository --repository-name distributed-job-processing-system-api --region "$AWS_REGION"
-aws ecr create-repository --repository-name distributed-job-processing-system-celery-worker --region "$AWS_REGION"
-aws ecr create-repository --repository-name distributed-job-processing-system-frontend --region "$AWS_REGION"
+aws ecr create-repository --repository-name distributed-job-processing-system-api --image-tag-mutability IMMUTABLE --region "$AWS_REGION"
+aws ecr create-repository --repository-name distributed-job-processing-system-celery-worker --image-tag-mutability IMMUTABLE --region "$AWS_REGION"
+aws ecr create-repository --repository-name distributed-job-processing-system-frontend --image-tag-mutability IMMUTABLE --region "$AWS_REGION"
 
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
@@ -154,4 +156,4 @@ docker push "$ECR_REGISTRY/distributed-job-processing-system-celery-worker:$IMAG
 docker push "$ECR_REGISTRY/distributed-job-processing-system-frontend:$IMAGE_TAG"
 ```
 
-After pushing, make sure [kustomization.yaml](./kustomization.yaml) points at the correct ECR registry and image tag.
+The complete deployment helper copies the Kubernetes manifests to a temporary directory, injects the ECR registry and commit SHA there, applies that rendered overlay, and removes the temporary files. The committed [kustomization.yaml](./kustomization.yaml) intentionally retains deployment placeholders.
