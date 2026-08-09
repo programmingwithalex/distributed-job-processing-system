@@ -5,6 +5,7 @@ import { JobRecordList } from "./components/JobRecordList";
 import { JobSubmissionForm } from "./components/JobSubmissionForm";
 import { SelectedJobStatus } from "./components/SelectedJobStatus";
 import { useSelectedJobRecord } from "./hooks/useSelectedJobRecord";
+import { replayJobRecord } from "./services/jobsApi";
 import type { JobStatusResponse } from "./types/jobs";
 
 
@@ -12,6 +13,9 @@ import type { JobStatusResponse } from "./types/jobs";
 export function App(): ReactElement {
   const [selectedJobIdentifier, setSelectedJobIdentifier] = useState<string | null>(null);
   const [jobRecordListRefreshSequence, setJobRecordListRefreshSequence] = useState<number>(0);
+  const [isReplayingSelectedJob, setIsReplayingSelectedJob] = useState<boolean>(false);
+  const [replayErrorMessage, setReplayErrorMessage] = useState<string | null>(null);
+  const [replaySuccessMessage, setReplaySuccessMessage] = useState<string | null>(null);
   const {
     selectedJobRecord,
     isLoadingSelectedJobRecord,
@@ -26,9 +30,34 @@ export function App(): ReactElement {
   }
 
 
+  /** Replay the selected dead-lettered job and focus the dashboard on its replacement. */
+  async function handleReplaySelectedJob(): Promise<void> {
+    if (selectedJobRecord?.status !== "dead_lettered") {
+      return;
+    }
+
+    setIsReplayingSelectedJob(true);
+    setReplayErrorMessage(null);
+    setReplaySuccessMessage(null);
+
+    try {
+      const replayedJobRecord = await replayJobRecord(selectedJobRecord.id);
+      handleCreatedJobRecord(replayedJobRecord);
+      setReplaySuccessMessage(`Replay queued as ${replayedJobRecord.id}`);
+    } catch (replayError) {
+      const message = replayError instanceof Error ? replayError.message : "Failed to replay selected job";
+      setReplayErrorMessage(message);
+    } finally {
+      setIsReplayingSelectedJob(false);
+    }
+  }
+
+
   /** Focus the dashboard on a selected row from the recent-jobs list. */
   function handleSelectedJobIdentifier(jobIdentifier: string): void {
     setSelectedJobIdentifier(jobIdentifier);
+    setReplayErrorMessage(null);
+    setReplaySuccessMessage(null);
   }
 
 
@@ -53,7 +82,7 @@ export function App(): ReactElement {
           </article>
           <article>
             <span>Retry states</span>
-            <strong>4</strong>
+            <strong>5</strong>
           </article>
           <article>
             <span>Desk mode</span>
@@ -69,7 +98,11 @@ export function App(): ReactElement {
           selectedJobRecord={selectedJobRecord}
           isLoadingSelectedJobRecord={isLoadingSelectedJobRecord}
           selectedJobRecordErrorMessage={selectedJobRecordErrorMessage}
+          isReplayingSelectedJob={isReplayingSelectedJob}
+          replayErrorMessage={replayErrorMessage}
+          replaySuccessMessage={replaySuccessMessage}
           onReloadSelectedJobRecord={reloadSelectedJobRecord}
+          onReplaySelectedJob={handleReplaySelectedJob}
         />
         <JobRecordList
           selectedJobIdentifier={selectedJobIdentifier}

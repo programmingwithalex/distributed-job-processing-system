@@ -16,8 +16,8 @@ from app.worker.celery_app import celery_app
 
 TRANSIENT_FAILURE_INPUT_PREFIX = "fail-once:"
 PERSISTENT_FAILURE_INPUT_PREFIX = "always-fail:"
-JOB_RETRY_BASE_DELAY_SECONDS = 5
-JOB_RETRY_MAXIMUM_DELAY_SECONDS = 60
+JOB_RETRY_DELAY_INCREMENT_SECONDS = 2
+JOB_RETRY_MAXIMUM_DELAY_SECONDS = 6
 logger = logging.getLogger(__name__)
 
 
@@ -46,7 +46,7 @@ def transform_job_input(input_value: str, job_type: JobType) -> str:
 
 def calculate_job_retry_delay_seconds(attempt_count: int) -> int:
     """
-    Calculate a bounded exponential delay from the persisted attempt count.
+    Calculate a short bounded linear delay from the persisted attempt count.
 
     Args:
         attempt_count: Current persisted processing attempt number
@@ -54,9 +54,9 @@ def calculate_job_retry_delay_seconds(attempt_count: int) -> int:
     Returns:
         Retry delay in seconds capped at the configured maximum
     """
-    retry_exponent = max(attempt_count - 1, 0)
+    bounded_attempt_count = max(attempt_count, 1)
     return min(
-        JOB_RETRY_BASE_DELAY_SECONDS * 2**retry_exponent,
+        JOB_RETRY_DELAY_INCREMENT_SECONDS * bounded_attempt_count,
         JOB_RETRY_MAXIMUM_DELAY_SECONDS,
     )
 
@@ -97,7 +97,7 @@ def process_submitted_job(self: Task, job_id: str) -> None:
 
     PostgreSQL remains authoritative for the attempt count and whether another retry
     is allowed. Celery supplies the bound task instance so retryable failures can use
-    `self.retry()` with bounded exponential backoff while preserving the task identity
+    `self.retry()` with short bounded linear backoff while preserving the task identity
     and Celery retry metadata.
 
     Args:
@@ -154,7 +154,7 @@ def process_submitted_job(self: Task, job_id: str) -> None:
                     updated_job_record.attempt_count,
                     updated_job_record.maximum_attempt_count,
                 )
-                # schedule bounded backoff while preserving Celery task identity
+                # schedule short bounded backoff while preserving Celery task identity
                 raise self.retry(
                     exc=processing_error,
                     countdown=retry_delay_seconds,
