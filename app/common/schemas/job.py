@@ -28,5 +28,6 @@ class JobStatusResponse(BaseModel):
     result: str | None
     error_message: str | None
     dead_lettered_at: datetime | None
+    replayed_from_job_id: UUID | None
     created_at: datetime
     updated_at: datetime

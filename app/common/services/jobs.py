@@ -31,6 +31,7 @@ def create_job_record(
     input_value: str,
     job_type: JobType,
     maximum_attempt_count: int | None = None,
+    replayed_from_job_id: UUID | None = None,
 ) -> JobRecord:
     """
     Persist a new queued job record and return the stored row.
@@ -40,6 +41,7 @@ def create_job_record(
         input_value: Input value submitted for processing
         job_type: Processing behavior requested for the job
         maximum_attempt_count: Optional per-job retry limit override
+        replayed_from_job_id: Optional identifier of the dead-lettered source job
 
     Returns:
         Persisted queued job record
@@ -50,11 +52,45 @@ def create_job_record(
         status=JobStatus.QUEUED,
         attempt_count=0,
         maximum_attempt_count=resolve_job_maximum_attempt_count(maximum_attempt_count=maximum_attempt_count),
+        replayed_from_job_id=replayed_from_job_id,
     )
     database_session.add(job_record)
     database_session.commit()
     database_session.refresh(job_record)
     return job_record
+
+
+def create_replayed_job_record(
+    database_session: Session,
+    dead_lettered_job_record: JobRecord,
+) -> JobRecord:
+    """
+    Create a fresh queued job linked to a dead-lettered source job.
+
+    The replay copies the source input, processing type, and retry budget while
+    preserving the source record as immutable failure history.
+
+    Args:
+        database_session: SQLAlchemy session used for persistence work
+        dead_lettered_job_record: Dead-lettered job used as the replay source
+
+    Returns:
+        Persisted queued replay job linked to the source job
+
+    Raises:
+        ValueError: Raised when the source job is not dead-lettered
+    """
+    if dead_lettered_job_record.status != JobStatus.DEAD_LETTERED:
+        raise ValueError("Only dead-lettered jobs can be replayed")
+
+    # create a new job so the original failure remains an immutable audit record
+    return create_job_record(
+        database_session=database_session,
+        input_value=dead_lettered_job_record.input_value,
+        job_type=dead_lettered_job_record.job_type,
+        maximum_attempt_count=dead_lettered_job_record.maximum_attempt_count,
+        replayed_from_job_id=dead_lettered_job_record.id,
+    )
 
 
 def get_job_record_by_id(database_session: Session, job_id: UUID) -> JobRecord | None:

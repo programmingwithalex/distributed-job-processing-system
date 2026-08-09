@@ -7,7 +7,12 @@ from sqlalchemy.orm import Session
 from app.common.database import get_database_session
 from app.common.models.job import JobStatus
 from app.common.schemas.job import JobCreateRequest, JobStatusResponse
-from app.common.services.jobs import create_job_record, get_job_record_by_id, list_job_records
+from app.common.services.jobs import (
+    create_job_record,
+    create_replayed_job_record,
+    get_job_record_by_id,
+    list_job_records,
+)
 from app.worker.tasks.jobs import process_submitted_job
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -43,6 +48,54 @@ def submit_job(
         job_record.input_value,
     )
     return JobStatusResponse.model_validate(job_record)
+
+
+@router.post(
+    "/{job_id}/replay",
+    response_model=JobStatusResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def replay_dead_lettered_job(
+    job_id: UUID,
+    database_session: Session = Depends(get_database_session),
+) -> JobStatusResponse:
+    """
+    Create and dispatch a new job from a dead-lettered source job.
+
+    The source remains unchanged as failure history while the new queued job records
+    its lineage through `replayed_from_job_id`.
+
+    Args:
+        job_id: Identifier of the dead-lettered source job
+        database_session: Request-scoped SQLAlchemy session
+
+    Returns:
+        Persisted queued replay job metadata
+    """
+    source_job_record = get_job_record_by_id(
+        database_session=database_session,
+        job_id=job_id,
+    )
+    if source_job_record is None:
+        logger.warning("Job %s was not found during replay", job_id)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    try:
+        replayed_job_record = create_replayed_job_record(
+            database_session=database_session,
+            dead_lettered_job_record=source_job_record,
+        )
+    except ValueError as replay_error:
+        logger.warning("Job %s cannot be replayed because it is not dead-lettered", job_id)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(replay_error),
+        ) from replay_error
+
+    # dispatch only after the replay row and its lineage are committed
+    process_submitted_job.delay(str(replayed_job_record.id))
+    logger.info("Replayed dead-lettered job %s as job %s", job_id, replayed_job_record.id)
+    return JobStatusResponse.model_validate(replayed_job_record)
 
 
 @router.get("/{job_id}", response_model=JobStatusResponse)
