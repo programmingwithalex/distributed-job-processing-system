@@ -45,12 +45,12 @@ def test_process_submitted_job_is_bound_to_celery_task_instance() -> None:
     assert callable(process_submitted_job.retry)
 
 
-def test_calculate_job_retry_delay_seconds_applies_bounded_exponential_backoff() -> None:
-    """Verify retry delays double from five seconds and stop increasing at sixty seconds."""
-    assert calculate_job_retry_delay_seconds(attempt_count=1) == 5
-    assert calculate_job_retry_delay_seconds(attempt_count=2) == 10
-    assert calculate_job_retry_delay_seconds(attempt_count=5) == 60
-    assert calculate_job_retry_delay_seconds(attempt_count=10) == 60
+def test_calculate_job_retry_delay_seconds_applies_short_bounded_linear_backoff() -> None:
+    """Verify retry delays increase by two seconds and stop increasing at six seconds."""
+    assert calculate_job_retry_delay_seconds(attempt_count=1) == 2
+    assert calculate_job_retry_delay_seconds(attempt_count=2) == 4
+    assert calculate_job_retry_delay_seconds(attempt_count=3) == 6
+    assert calculate_job_retry_delay_seconds(attempt_count=10) == 6
 
 
 def test_process_submitted_job_uses_celery_retry_when_job_remains_queued() -> None:
