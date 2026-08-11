@@ -15,6 +15,8 @@ terraform -chdir=infra/terraform/bootstrap init
 terraform -chdir=infra/terraform/bootstrap apply
 ```
 
+Reapply this bootstrap configuration when its GitHub Actions IAM policy changes. In particular, apply the immutable-image delivery update before dispatching the EKS deployment workflow so the OIDC role can configure ECR tag mutability.
+
 Copy the displayed `state_bucket_name` into `infra/terraform/backend.hcl` using [../backend.hcl.example](../backend.hcl.example), then migrate the existing EKS state when prompted:
 
 ```bash

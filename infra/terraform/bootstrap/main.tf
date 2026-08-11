@@ -163,6 +163,8 @@ data "aws_iam_policy_document" "github_actions_environment_management" {
       "ecr:ListTagsForResource",
       "ecr:PutImage",
       "ecr:PutImageScanningConfiguration",
+      # allow Terraform and the publisher to enforce immutable repository tags
+      "ecr:PutImageTagMutability",
       "ecr:TagResource",
       "ecr:UntagResource",
       "ecr:UploadLayerPart",
