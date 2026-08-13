@@ -13,4 +13,5 @@ COPY alembic ./alembic
 RUN pip install --no-cache-dir uv \
     && uv pip install --system .
 
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.api.main:app --host 0.0.0.0 --port 8000"]
+# migrations run as a separate deployment step before api containers start
+CMD ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

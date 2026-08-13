@@ -22,7 +22,8 @@ INGRESS_NGINX_MANIFEST="https://raw.githubusercontent.com/kubernetes/ingress-ngi
 
 # render account-specific values to a temporary file so tracked manifests stay unchanged
 rendered_manifest="$(mktemp)"
-trap 'rm -f "$rendered_manifest"' EXIT
+rendered_migration_manifest="$(mktemp)"
+trap 'rm -f "$rendered_manifest" "$rendered_migration_manifest"' EXIT
 
 require_command() {
   local command_name="$1"
@@ -64,6 +65,41 @@ render_deployment_manifest() {
   # fail before kubectl apply if a template value was not replaced
   if grep -Fq "deployment-placeholder" "$rendered_manifest"; then
     echo "rendered EKS manifest still contains deployment placeholders" >&2
+    exit 1
+  fi
+}
+
+# inject the exact immutable api image into the one-off migration job
+render_migration_manifest() {
+  sed \
+    -e "s|distributed-job-processing-system-api:latest|${ECR_REGISTRY}/distributed-job-processing-system-api:${IMAGE_TAG}|" \
+    "$repo_root/infra/k8s/base/database-migration-job.yaml" \
+    >"$rendered_migration_manifest"
+
+  if grep -Fq "distributed-job-processing-system-api:latest" "$rendered_migration_manifest"; then
+    echo "rendered migration manifest still contains the local api image" >&2
+    exit 1
+  fi
+}
+
+# recreate the fixed-name job so its immutable pod template uses the current image
+run_database_migration() {
+  kubectl delete job database-migration \
+    --namespace "$NAMESPACE" \
+    --ignore-not-found \
+    --wait=true
+
+  kubectl apply \
+    --namespace "$NAMESPACE" \
+    --filename "$rendered_migration_manifest"
+
+  # print migration logs when the job fails or exceeds its five-minute budget
+  if ! kubectl wait \
+    --namespace "$NAMESPACE" \
+    --for=condition=complete \
+    job/database-migration \
+    --timeout=300s; then
+    kubectl logs job/database-migration --namespace "$NAMESPACE" || true
     exit 1
   fi
 }
@@ -127,6 +163,18 @@ bash "$repo_root/infra/k8s/overlays/eks/publish-images.sh"
 
 echo "rendering EKS overlay for commit ${IMAGE_TAG}"
 render_deployment_manifest
+
+# apply only the resources required by the migration, then wait for postgres
+echo "preparing database migration"
+kubectl apply \
+  --namespace "$NAMESPACE" \
+  --filename "$repo_root/infra/k8s/base/postgres-deployment.yaml" \
+  --filename "$repo_root/infra/k8s/base/postgres-service.yaml"
+kubectl rollout status deployment/postgres --namespace "$NAMESPACE" --timeout=300s
+
+echo "running database migration"
+render_migration_manifest
+run_database_migration
 
 echo "applying rendered EKS overlay"
 kubectl apply -f "$rendered_manifest"

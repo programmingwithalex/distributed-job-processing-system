@@ -1,0 +1,38 @@
+# run pending alembic migrations once after postgres is ready and before application rollout
+# database state lives outside container images, so a new image cannot include an upgraded schema
+# keeping migrations in this job prevents multiple api replicas from racing the same schema change
+# the schema needs one upgrade per release, not one upgrade per api replica
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: database-migration
+spec:
+  # retry transient migration failures without retrying indefinitely
+  backoffLimit: 3
+  # remove completed job objects after retaining brief troubleshooting history
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: database-migration
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: database-migration
+          # reuse the api image because it contains Alembic and all migration files
+          image: distributed-job-processing-system-api:latest
+          imagePullPolicy: IfNotPresent
+          command: ["alembic", "upgrade", "head"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: application-secrets
+                  key: DATABASE_URL

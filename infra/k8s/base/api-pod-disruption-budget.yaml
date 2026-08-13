@@ -1,0 +1,15 @@
+# preserve api capacity during voluntary disruptions such as node drains and upgrades
+apiVersion: policy/v1
+kind: PodDisruptionBudget  # built-in K8s resource that limits voluntary pod evictions
+metadata:
+  name: api
+spec:
+  # keep at least one of the two api replicas available during an eviction
+  minAvailable: 1
+  selector:
+    matchLabels:
+      # match the same label assigned by the api deployment
+      app: api
+
+# this policy limits voluntary evictions; it cannot prevent crashes or node failures
+# evictions are K8s asking a pod to leave a node, not forcibly killing it; the pod can refuse to leave if the PDB would be violated
