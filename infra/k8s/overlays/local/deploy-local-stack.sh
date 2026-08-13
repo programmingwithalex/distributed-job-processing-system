@@ -28,6 +28,28 @@ require_command helm
 require_command k3d
 require_command kubectl
 
+# recreate the fixed-name job so its immutable pod template uses the current image
+run_database_migration() {
+  kubectl delete job database-migration \
+    --namespace "$NAMESPACE" \
+    --ignore-not-found \
+    --wait=true
+
+  kubectl apply \
+    --namespace "$NAMESPACE" \
+    --filename "$repo_root/infra/k8s/base/database-migration-job.yaml"
+
+  # print migration logs when the job fails or exceeds its five-minute budget
+  if ! kubectl wait \
+    --namespace "$NAMESPACE" \
+    --for=condition=complete \
+    job/database-migration \
+    --timeout=300s; then
+    kubectl logs job/database-migration --namespace "$NAMESPACE" || true
+    exit 1
+  fi
+}
+
 # start from a clean cluster so stale images and Kubernetes resources cannot affect the test
 echo "recreating k3d cluster ${CLUSTER_NAME}"
 k3d cluster delete "$CLUSTER_NAME" || true
@@ -64,6 +86,19 @@ helm upgrade --install "$MONITORING_RELEASE" oci://ghcr.io/prometheus-community/
   --atomic \
   --wait \
   --timeout 10m
+
+# apply only the resources required by the migration, then wait for postgres
+echo "preparing database migration"
+kubectl apply --filename "$repo_root/infra/k8s/base/namespace.yaml"
+kubectl apply \
+  --namespace "$NAMESPACE" \
+  --filename "$repo_root/infra/k8s/overlays/local/secret.yaml" \
+  --filename "$repo_root/infra/k8s/base/postgres-deployment.yaml" \
+  --filename "$repo_root/infra/k8s/base/postgres-service.yaml"
+kubectl rollout status deployment/postgres --namespace "$NAMESPACE" --timeout=300s
+
+echo "running database migration"
+run_database_migration
 
 # create the application namespace, configuration, workloads, services, ingress, and monitors
 echo "applying local application overlay"

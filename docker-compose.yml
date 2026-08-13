@@ -9,13 +9,13 @@ services:
       API_PROXY_TARGET: http://api:8000
     depends_on:
       api:
-        # wait until the api container has started before launching the frontend
-        condition: service_started
+        # wait until the api health endpoint responds before launching the frontend
+        condition: service_healthy
     ports:
       - "5173:5173"
 
   api:
-    # serve the fastapi application and run migrations on startup
+    # serve the fastapi application after the one-off migration service succeeds
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.api
@@ -28,14 +28,36 @@ services:
       DEFAULT_MAXIMUM_ATTEMPT_COUNT: 3
       CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
     depends_on:
+      database_migration:
+        # never start application replicas against an older database schema
+        condition: service_completed_successfully
       postgres:
         # block api startup until postgres accepts connections
         condition: service_healthy
       rabbitmq:
         # block api startup until the broker is reachable
         condition: service_healthy
+    healthcheck:
+      # use Python from the api image instead of adding curl to the runtime image
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
     ports:
       - "8000:8000"
+
+  database_migration:
+    # apply pending schema changes once before api and worker containers start
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    command: ["alembic", "upgrade", "head"]  # overrides Dockerfile.api's default command to run migrations only
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/jobs
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   celery_worker:
     # process queued jobs using the same shared application code as the api
@@ -49,6 +71,9 @@ services:
       DEFAULT_MAXIMUM_ATTEMPT_COUNT: 3
       CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
     depends_on:
+      database_migration:
+        # worker persistence requires the same current schema as the api
+        condition: service_completed_successfully
       postgres:
         # worker needs the database before it can persist job state changes
         condition: service_healthy

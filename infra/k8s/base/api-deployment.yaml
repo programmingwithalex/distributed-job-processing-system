@@ -1,11 +1,21 @@
-# fastapi deployment that serves requests and runs migrations on startup
+# fastapi deployment that serves requests after the migration job succeeds
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   # deployment object name inside kubernetes
   name: api
 spec:
-  replicas: 1
+  replicas: 2
+  # require a new pod to stay ready before treating the rollout as available
+  minReadySeconds: 10
+  # report a stalled rollout after the deployment helper's five-minute timeout
+  progressDeadlineSeconds: 300
+  # keep the current api pod available until one replacement pod is ready
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1  # number of temporary replacement pods to create during the update
   selector:
     matchLabels:
       # deployment manages pods carrying this app label
@@ -16,6 +26,8 @@ spec:
         # pod label that must match the selector above
         app: api
     spec:
+      # allow uvicorn to finish active requests after kubernetes sends SIGTERM
+      terminationGracePeriodSeconds: 30
       containers:
         - name: api
           # container name inside the pod, separate from the deployment name above
@@ -23,6 +35,20 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
+          # requests reserve enough node capacity for normal api traffic
+          # limits contain abnormal usage without letting one pod consume the node
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          # pause briefly while service endpoint removal propagates
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]
           # shared non-secret settings
           envFrom:
             - configMapRef:
@@ -39,7 +65,16 @@ spec:
                 secretKeyRef:
                   name: application-secrets
                   key: CELERY_BROKER_URL
+          # allow up to 60 seconds for uvicorn startup
+          # readiness and liveness checks remain disabled until this succeeds
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 12
           # the health route is enough for a first-pass readiness signal
+          # failures means pod removed from Service
           readinessProbe:
             httpGet:
               path: /health
