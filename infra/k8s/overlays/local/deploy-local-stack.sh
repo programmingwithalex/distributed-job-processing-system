@@ -8,6 +8,9 @@ NAMESPACE="${NAMESPACE:-dist-jobs}"
 MONITORING_NAMESPACE="${MONITORING_NAMESPACE:-monitoring}"
 MONITORING_RELEASE="${MONITORING_RELEASE:-monitoring}"
 MONITORING_CHART_VERSION="87.21.0"
+ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-argocd}"
+ARGOCD_RELEASE="${ARGOCD_RELEASE:-argocd}"
+ARGOCD_CHART_VERSION="10.3.3"
 INGRESS_NGINX_MANIFEST="https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml"
 
 # resolve every relative path from the repository root, regardless of the caller's directory
@@ -87,6 +90,19 @@ helm upgrade --install "$MONITORING_RELEASE" oci://ghcr.io/prometheus-community/
   --wait \
   --timeout 10m
 
+# install the gitops control plane without assigning it application resources yet
+# api server exposes the ui, cli, authentication, and application status
+# repository server clones git repositories and renders kubernetes manifests
+# application controller compares desired git state with the live cluster and reconciles differences
+echo "installing Argo CD"
+helm upgrade --install "$ARGOCD_RELEASE" oci://ghcr.io/argoproj/argo-helm/argo-cd \
+  --namespace "$ARGOCD_NAMESPACE" \
+  --create-namespace \
+  --version "$ARGOCD_CHART_VERSION" \
+  --atomic \
+  --wait \
+  --timeout 10m
+
 # apply only the resources required by the migration, then wait for postgres
 echo "preparing database migration"
 kubectl apply --filename "$repo_root/infra/k8s/base/namespace.yaml"
@@ -110,9 +126,10 @@ for deployment in postgres rabbitmq api celery-worker frontend; do
   kubectl rollout status "deployment/${deployment}" --namespace "$NAMESPACE" --timeout=300s
 done
 
-echo "local application and monitoring stacks deployed"
+echo "local application, monitoring, and Argo CD stacks deployed"
 kubectl get pods --namespace "$NAMESPACE"
 kubectl get pods --namespace "$MONITORING_NAMESPACE"
+kubectl get pods --namespace "$ARGOCD_NAMESPACE"
 
 cat <<EOF
 
@@ -121,4 +138,11 @@ Access the application at http://localhost:8080
 Access Alertmanager in a separate terminal:
   kubectl port-forward --namespace ${MONITORING_NAMESPACE} service/${MONITORING_RELEASE}-kube-prometheus-alertmanager 9093:9093
   open http://localhost:9093
+
+Access Argo CD in a separate terminal:
+  kubectl port-forward --namespace ${ARGOCD_NAMESPACE} service/${ARGOCD_RELEASE}-server 8081:443
+  open https://localhost:8081
+
+Log in with username admin and retrieve the generated initial password:
+  kubectl get secret ${ARGOCD_RELEASE}-initial-admin-secret --namespace ${ARGOCD_NAMESPACE} --output jsonpath='{.data.password}' | base64 --decode
 EOF
