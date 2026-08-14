@@ -98,30 +98,63 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # compare the pull request's base and head commits without another API dependency
+          fetch-depth: 0
+
+      - name: Detect frontend integration changes
+        id: frontend_changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- \
+            .dockerignore \
+            .github/workflows/ci.yml \
+            alembic \
+            alembic.ini \
+            app \
+            docker-compose.yml \
+            frontend \
+            infra/docker \
+            pyproject.toml \
+            uv.lock; then
+            echo "required=false" >> "$GITHUB_OUTPUT"
+            echo "No frontend integration changes detected"
+          else
+            echo "required=true" >> "$GITHUB_OUTPUT"
+            echo "Frontend integration changes detected"
+          fi
 
       # setup-node requires pnpm to exist before it can resolve the pnpm cache location
       - uses: pnpm/action-setup@v4
+        if: steps.frontend_changes.outputs.required == 'true'
         with:
           version: 10
 
       - uses: actions/setup-node@v4
+        if: steps.frontend_changes.outputs.required == 'true'
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install frontend dependencies
+        if: steps.frontend_changes.outputs.required == 'true'
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
       - name: Build frontend
+        if: steps.frontend_changes.outputs.required == 'true'
         working-directory: frontend
         run: pnpm build
 
       - name: Start local application stack
+        if: steps.frontend_changes.outputs.required == 'true'
         run: docker compose up --build --detach
 
       - name: Wait for local API
+        if: steps.frontend_changes.outputs.required == 'true'
         run: |
           # browser tests require the API before they can create and query jobs
           for attempt in {1..30}; do
@@ -133,6 +166,7 @@ jobs:
           exit 1
 
       - name: Run frontend end-to-end tests
+        if: steps.frontend_changes.outputs.required == 'true'
         working-directory: frontend
         run: |
           pnpm exec playwright install --with-deps chromium
@@ -140,7 +174,7 @@ jobs:
 
       - name: Upload Playwright artifacts
         # retain browser diagnostics only when an end-to-end test fails
-        if: failure()
+        if: failure() && steps.frontend_changes.outputs.required == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: playwright-artifacts
@@ -151,5 +185,5 @@ jobs:
 
       - name: Stop local application stack
         # release runner resources even if a prior step fails
-        if: always()
+        if: always() && steps.frontend_changes.outputs.required == 'true'
         run: docker compose down --volumes
