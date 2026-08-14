@@ -90,10 +90,10 @@ helm upgrade --install "$MONITORING_RELEASE" oci://ghcr.io/prometheus-community/
   --wait \
   --timeout 10m
 
-# install the gitops control plane without assigning it application resources yet
-# api server exposes the ui, cli, authentication, and application status
-# repository server clones git repositories and renders kubernetes manifests
-# application controller compares desired git state with the live cluster and reconciles differences
+# install the gitops control plane without assigning it application resources yet - 3 control plane components are installed:
+#  - api server exposes the ui, cli, authentication, and application status
+#  - repository server clones git repositories and renders kubernetes manifests
+#  - application controller compares desired git state with the live cluster and reconciles differences
 echo "installing Argo CD"
 helm upgrade --install "$ARGOCD_RELEASE" oci://ghcr.io/argoproj/argo-helm/argo-cd \
   --namespace "$ARGOCD_NAMESPACE" \
@@ -102,6 +102,10 @@ helm upgrade --install "$ARGOCD_RELEASE" oci://ghcr.io/argoproj/argo-helm/argo-c
   --atomic \
   --wait \
   --timeout 10m
+
+# register desired state for comparison while leaving synchronization under manual control
+echo "registering local Argo CD application"
+kubectl apply --filename "$repo_root/infra/k8s/argocd/local-application.yaml"
 
 # apply only the resources required by the migration, then wait for postgres
 echo "preparing database migration"
@@ -130,6 +134,7 @@ echo "local application, monitoring, and Argo CD stacks deployed"
 kubectl get pods --namespace "$NAMESPACE"
 kubectl get pods --namespace "$MONITORING_NAMESPACE"
 kubectl get pods --namespace "$ARGOCD_NAMESPACE"
+kubectl get applications.argoproj.io --namespace "$ARGOCD_NAMESPACE"
 
 cat <<EOF
 
