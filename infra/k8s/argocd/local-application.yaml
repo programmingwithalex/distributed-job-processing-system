@@ -16,5 +16,10 @@ spec:
     # address the cluster where Argo CD itself is running
     server: https://kubernetes.default.svc
     namespace: dist-jobs
-
-# automated sync is intentionally omitted so the first reconciliation requires manual approval
+  syncPolicy:
+    automated:
+      # apply desired state and correct live drift without requiring manual sync
+      enabled: true
+      selfHeal: true
+      # keep resources removed from git until deletion is enabled separately
+      prune: false
