@@ -46,7 +46,25 @@ The Application tracks:
 - source path: `infra/k8s/overlays/local`
 - destination namespace: `dist-jobs`
 
-Automated sync is intentionally omitted. Argo CD can fetch, render, compare, and display drift, but changing cluster resources requires a manual Sync.
+## Automated synchronization
+
+The Application automatically applies desired state from `main` and corrects live drift:
+
+```yaml
+syncPolicy:
+  automated:
+    enabled: true
+    selfHeal: true
+    prune: false
+```
+
+- `enabled: true` allows Argo CD to synchronize without manual approval
+- `selfHeal: true` restores resources when live cluster configuration differs from Git
+- `prune: false` prevents automatic deletion when a resource is removed from Git
+
+Keeping pruning disabled separates drift recovery from deletion authority. Resource deletion can be enabled and tested as a later policy change.
+
+Use [SELF_HEALING_VALIDATION.md](SELF_HEALING_VALIDATION.md) for the repeatable local drift and recovery demonstration.
 
 ## Destination server
 
