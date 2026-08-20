@@ -1,5 +1,41 @@
 #!/usr/bin/env bash
 
+# EKS APPLICATION DEPLOYMENT OVERVIEW
+#
+# Keep this ordered list current whenever this script gains, removes, or reorders steps.
+# This script does not create the AWS foundation. Terraform must first provision the
+# EKS cluster, managed nodes, networking, ECR repositories, and required IAM access.
+#
+# In order, this script:
+# 1. Resolves the repository root, AWS account and region, EKS cluster, namespaces,
+#    ECR registry, and immutable image tag (the current full Git SHA by default).
+# 2. Creates temporary files for rendered Kubernetes and Argo CD manifests; tracked
+#    templates remain account-neutral and the temporary files are deleted on exit.
+# 3. Verifies that the required local commands are installed.
+# 4. Refreshes kubeconfig for the existing EKS cluster and makes it the kubectl target.
+# 5. Installs ingress-nginx and waits for its controller Deployment to become ready.
+# 6. Installs or upgrades the pinned kube-prometheus-stack Helm release and waits for
+#    its monitoring resources to become ready.
+# 7. Installs or upgrades the pinned Argo CD Helm release, including its CRDs,
+#    controllers, UI/API Service, repo server, Dex, dedicated Redis, RBAC, and config.
+# 8. Creates the application namespace and, only when absent, generates and stores
+#    PostgreSQL and Celery connection values in the application-secrets Secret.
+# 9. Builds and publishes the API, Celery worker, and frontend images to ECR using the
+#    immutable Git SHA tag, or reuses images already published for that commit.
+# 10. Builds the EKS Kustomize overlay and replaces account and release placeholders
+#     in temporary output with the selected ECR registry and image tag.
+# 11. Deploys PostgreSQL first and waits for it before running database migrations.
+# 12. Renders the one-off migration Job with the immutable API image, recreates the
+#     Job with Kubernetes Service environment injection disabled, waits for completion,
+#     and prints its logs if it fails or times out.
+# 13. Directly applies the rendered EKS application and monitoring manifests, then
+#     waits for PostgreSQL, RabbitMQ, API, worker, and frontend rollouts.
+# 14. Renders and registers the manual-sync dist-jobs-eks Argo CD Application only
+#     after the direct rollout is healthy; Argo CD does not take sync control yet.
+# 15. Verifies that each application Deployment uses the expected immutable ECR image.
+# 16. Reports application, monitoring, Argo CD, and ingress resources and prints the
+#     ingress load balancer hostname.
+#
 # EKS recreation changes its API endpoint; this script refreshes kubeconfig below.
 # For manual kubectl or helm access after redeployment, rerun:
 # aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
@@ -18,12 +54,16 @@ NAMESPACE="${NAMESPACE:-dist-jobs}"
 MONITORING_NAMESPACE="${MONITORING_NAMESPACE:-monitoring}"
 MONITORING_RELEASE="${MONITORING_RELEASE:-monitoring}"
 MONITORING_CHART_VERSION="87.21.0"
+ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-argocd}"
+ARGOCD_RELEASE="${ARGOCD_RELEASE:-argocd}"
+ARGOCD_CHART_VERSION="10.3.3"
 INGRESS_NGINX_MANIFEST="https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml"
 
 # render account-specific values to a temporary file so tracked manifests stay unchanged
 rendered_manifest="$(mktemp)"
 rendered_migration_manifest="$(mktemp)"
-trap 'rm -f "$rendered_manifest" "$rendered_migration_manifest"' EXIT
+rendered_argocd_application="$(mktemp)"
+trap 'rm -f "$rendered_manifest" "$rendered_migration_manifest" "$rendered_argocd_application"' EXIT
 
 require_command() {
   local command_name="$1"
@@ -78,6 +118,24 @@ render_migration_manifest() {
 
   if grep -Fq "distributed-job-processing-system-api:latest" "$rendered_migration_manifest"; then
     echo "rendered migration manifest still contains the local api image" >&2
+    exit 1
+  fi
+}
+
+# inject the selected ECR registry and immutable release into the EKS Application
+render_argocd_application() {
+  # sed reads the tracked template and replaces every deployment marker in its output
+  # - deployment-registry becomes the authenticated account's ECR registry
+  # - deployment-placeholder becomes the full Git SHA used by images and annotations
+  # the redirected output is temporary, so the tracked template remains unchanged
+  sed \
+    -e "s|deployment-registry|${ECR_REGISTRY}|g" \
+    -e "s|deployment-placeholder|${IMAGE_TAG}|g" \
+    "$repo_root/infra/k8s/argocd/eks-application.yaml" \
+    >"$rendered_argocd_application"
+
+  if grep -Eq "deployment-(registry|placeholder)" "$rendered_argocd_application"; then
+    echo "rendered EKS Application still contains deployment markers" >&2
     exit 1
   fi
 }
@@ -152,6 +210,25 @@ helm upgrade --install "$MONITORING_RELEASE" oci://ghcr.io/prometheus-community/
   --wait \
   --timeout 10m
 
+# install the GitOps control plane without registering this project's Application yet
+# Helm chart 10.3.3 creates:
+# - CRDs: applications, applicationsets, and appprojects
+# - Services: server (UI/API), repo-server, applicationset-controller, Dex, and Redis
+# - Deployments: server, repo-server, applicationset-controller, notifications, Dex, and Redis
+# - StatefulSet: application-controller, which compares desired and live state
+# - supporting resources: ServiceAccounts, RBAC, ConfigMaps, Secrets, NetworkPolicies,
+#   and the Redis secret-initialization Job
+# Important: this chart installs a dedicated Redis instance for Argo CD's internal
+# caching and coordination; it is not part of the job-processing application stack
+echo "installing Argo CD"
+helm upgrade --install "$ARGOCD_RELEASE" oci://ghcr.io/argoproj/argo-helm/argo-cd \
+  --namespace "$ARGOCD_NAMESPACE" \
+  --create-namespace \
+  --version "$ARGOCD_CHART_VERSION" \
+  --atomic \
+  --wait \
+  --timeout 10m
+
 echo "creating namespace ${NAMESPACE}"
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
@@ -184,6 +261,12 @@ for deployment in postgres rabbitmq api celery-worker frontend; do
   kubectl rollout status "deployment/${deployment}" --namespace "$NAMESPACE" --timeout=300s
 done
 
+# register the desired state only after the direct rollout is healthy
+echo "registering EKS Argo CD application"
+render_argocd_application
+kubectl apply --filename "$rendered_argocd_application"
+kubectl get application dist-jobs-eks --namespace "$ARGOCD_NAMESPACE"
+
 echo "verifying immutable application images"
 verify_deployment_image "api" "api" "${ECR_REGISTRY}/distributed-job-processing-system-api:${IMAGE_TAG}"
 verify_deployment_image "celery-worker" "celery-worker" "${ECR_REGISTRY}/distributed-job-processing-system-celery-worker:${IMAGE_TAG}"
@@ -196,6 +279,10 @@ kubectl get pods,services,ingress --namespace "$NAMESPACE"
 echo "monitoring stack deployed"
 helm status "$MONITORING_RELEASE" --namespace "$MONITORING_NAMESPACE"
 kubectl get pods,services --namespace "$MONITORING_NAMESPACE"
+
+echo "Argo CD control plane deployed"
+helm status "$ARGOCD_RELEASE" --namespace "$ARGOCD_NAMESPACE"
+kubectl get pods,services --namespace "$ARGOCD_NAMESPACE"
 
 echo "ingress endpoint"
 kubectl get service ingress-nginx-controller \

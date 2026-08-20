@@ -1,0 +1,27 @@
+# compare the EKS overlay with the running cluster without taking deployment control yet
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dist-jobs-eks
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/programmingwithalex/distributed-job-processing-system.git
+    targetRevision: main
+    # Argo CD finds this directory's kustomization.yaml and follows its resource references
+    path: infra/k8s/overlays/eks
+    kustomize:
+      # the deploy script replaces these markers with the selected immutable release
+      commonAnnotations:
+        distributed-jobs.dev/source-revision: "deployment-placeholder"
+      # override the account-neutral annotation already declared by the EKS overlay
+      forceCommonAnnotations: true
+      images:
+        - distributed-job-processing-system-api:latest=deployment-registry/distributed-job-processing-system-api:deployment-placeholder
+        - distributed-job-processing-system-celery_worker:latest=deployment-registry/distributed-job-processing-system-celery-worker:deployment-placeholder
+        - distributed-job-processing-system-frontend:latest=deployment-registry/distributed-job-processing-system-frontend:deployment-placeholder
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dist-jobs
+# automated sync is omitted so EKS changes require explicit review and manual approval
