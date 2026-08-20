@@ -16,6 +16,8 @@ spec:
       labels:
         app: database-migration
     spec:
+      # prevent the api Service from injecting API_PORT=tcp://... into application settings
+      enableServiceLinks: false
       restartPolicy: Never
       containers:
         - name: database-migration
