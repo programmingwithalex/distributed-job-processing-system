@@ -82,7 +82,7 @@ else
 
   echo "building local images for cluster ${CLUSTER_NAME} with docker compose"
   cd "$repo_root"
-  docker compose build api celery_worker frontend
+  docker compose --project-name distributed-job-processing-system build api celery_worker frontend
 
   build_tag_push "distributed-job-processing-system-api:latest" "$api_repo"
   build_tag_push "distributed-job-processing-system-celery_worker:latest" "$worker_repo"
