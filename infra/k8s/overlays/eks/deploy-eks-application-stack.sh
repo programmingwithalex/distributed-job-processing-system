@@ -191,7 +191,8 @@ ensure_tracked_release_images() {
   fi
 
   echo "publishing missing images from tracked source commit ${RELEASE_IMAGE_TAG}"
-  if ! IMAGE_TAG="$RELEASE_IMAGE_TAG" \
+  if ! COMPOSE_PROJECT_NAME=distributed-job-processing-system \
+    IMAGE_TAG="$RELEASE_IMAGE_TAG" \
     bash "$release_source_dir/infra/k8s/overlays/eks/publish-images.sh"; then
     rm -rf "$release_source_dir"
     exit 1
