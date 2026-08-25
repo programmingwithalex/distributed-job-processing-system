@@ -5,24 +5,23 @@ namespace: dist-jobs
 resources: # tells Kustomize what else to add to the manifest bundle
   - ../../base
   - ../../monitoring
-# the deploy script replaces this marker with the selected full Git commit SHA
+# record the source commit used to build the promoted application images
 commonAnnotations:
-  distributed-jobs.dev/source-revision: deployment-placeholder
+  distributed-jobs.dev/source-revision: "c026b07cf003adcb8edc991b0d1ae38bac18d409"
 
 # do not add secret.example.yaml here as a live resource
 # create an uncommitted secret.yaml from secret.example.yaml or create the
 # application-secrets Secret externally before deploying this overlay to EKS
-# 000000000000 is an account-neutral marker; the deploy script discovers the
-# authenticated AWS account ID and replaces these complete image references
+# these immutable ECR references are the Git-tracked EKS release Argo CD deploys
 images:
   - name: distributed-job-processing-system-api:latest
-    newName: 000000000000.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-api
-    newTag: deployment-placeholder
+    newName: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-api
+    newTag: "c026b07cf003adcb8edc991b0d1ae38bac18d409"
   - name: distributed-job-processing-system-celery_worker:latest
-    newName: 000000000000.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-celery-worker
-    newTag: deployment-placeholder
+    newName: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-celery-worker
+    newTag: "c026b07cf003adcb8edc991b0d1ae38bac18d409"
   - name: distributed-job-processing-system-frontend:latest
-    newName: 000000000000.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-frontend
-    newTag: deployment-placeholder
+    newName: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-frontend
+    newTag: "c026b07cf003adcb8edc991b0d1ae38bac18d409"
 patches:
   - path: configmap-patch.yaml # overrides the base configmap with EKS-specific values
