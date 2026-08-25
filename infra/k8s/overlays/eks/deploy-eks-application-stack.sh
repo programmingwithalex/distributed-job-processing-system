@@ -9,8 +9,7 @@
 # In order, this script:
 # 1. Resolves the repository root, AWS account and region, EKS cluster, namespaces,
 #    ECR registry, and immutable image tag (the current full Git SHA by default).
-# 2. Creates temporary files for rendered Kubernetes and Argo CD manifests; tracked
-#    templates remain account-neutral and the temporary files are deleted on exit.
+# 2. Creates temporary files for rendered Kubernetes manifests and deletes them on exit.
 # 3. Verifies that the required local commands are installed.
 # 4. Refreshes kubeconfig for the existing EKS cluster and makes it the kubectl target.
 # 5. Installs ingress-nginx and waits for its controller Deployment to become ready.
@@ -20,18 +19,18 @@
 #    controllers, UI/API Service, repo server, Dex, dedicated Redis, RBAC, and config.
 # 8. Creates the application namespace and, only when absent, generates and stores
 #    PostgreSQL and Celery connection values in the application-secrets Secret.
-# 9. Builds and publishes the API, Celery worker, and frontend images to ECR using the
-#    immutable Git SHA tag, or reuses images already published for that commit.
-# 10. Builds the EKS Kustomize overlay and replaces account and release placeholders
-#     in temporary output with the selected ECR registry and image tag.
+# 9. Builds the EKS Kustomize overlay and resolves its Git-tracked ECR registry and
+#    immutable release tag.
+# 10. Reuses promoted images already in ECR or rebuilds missing images from the exact
+#     tracked source commit without tagging newer source as an older release.
 # 11. Deploys PostgreSQL first and waits for it before running database migrations.
 # 12. Renders the one-off migration Job with the immutable API image, recreates the
 #     Job with Kubernetes Service environment injection disabled, waits for completion,
 #     and prints its logs if it fails or times out.
 # 13. Directly applies the rendered EKS application and monitoring manifests, then
 #     waits for PostgreSQL, RabbitMQ, API, worker, and frontend rollouts.
-# 14. Renders and registers the manual-sync dist-jobs-eks Argo CD Application only
-#     after the direct rollout is healthy; Argo CD does not take sync control yet.
+# 14. Registers the manual-sync dist-jobs-eks Argo CD Application only after the
+#     direct rollout is healthy; Argo CD does not take sync control yet.
 # 15. Verifies that each application Deployment uses the expected immutable ECR image.
 # 16. Reports application, monitoring, Argo CD, and ingress resources and prints the
 #     ingress load balancer hostname.
@@ -62,8 +61,10 @@ INGRESS_NGINX_MANIFEST="https://raw.githubusercontent.com/kubernetes/ingress-ngi
 # render account-specific values to a temporary file so tracked manifests stay unchanged
 rendered_manifest="$(mktemp)"
 rendered_migration_manifest="$(mktemp)"
-rendered_argocd_application="$(mktemp)"
-trap 'rm -f "$rendered_manifest" "$rendered_migration_manifest" "$rendered_argocd_application"' EXIT
+trap 'rm -f "$rendered_manifest" "$rendered_migration_manifest"' EXIT
+
+RELEASE_IMAGE_TAG=""
+RELEASE_ECR_REGISTRY=""
 
 require_command() {
   local command_name="$1"
@@ -92,50 +93,122 @@ create_application_secret() {
     --from-literal=CELERY_BROKER_URL='amqp://guest:guest@rabbitmq:5672//'
 }
 
-# render Kustomize first, then replace only the explicit deployment placeholders
+# render the exact release recorded in the Git-tracked EKS overlay
 render_deployment_manifest() {
-  kubectl kustomize "$repo_root/infra/k8s/overlays/eks" |
-    sed \
-      -e "s|000000000000.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-api:deployment-placeholder|${ECR_REGISTRY}/distributed-job-processing-system-api:${IMAGE_TAG}|g" \
-      -e "s|000000000000.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-celery-worker:deployment-placeholder|${ECR_REGISTRY}/distributed-job-processing-system-celery-worker:${IMAGE_TAG}|g" \
-      -e "s|000000000000.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-frontend:deployment-placeholder|${ECR_REGISTRY}/distributed-job-processing-system-frontend:${IMAGE_TAG}|g" \
-      -e "s|distributed-jobs.dev/source-revision: deployment-placeholder|distributed-jobs.dev/source-revision: ${IMAGE_TAG}|g" \
-      >"$rendered_manifest"
+  kubectl kustomize "$repo_root/infra/k8s/overlays/eks" >"$rendered_manifest"
 
-  # fail before kubectl apply if a template value was not replaced
-  if grep -Fq "deployment-placeholder" "$rendered_manifest"; then
-    echo "rendered EKS manifest still contains deployment placeholders" >&2
+  if grep -Eq "deployment-placeholder|000000000000" "$rendered_manifest"; then
+    echo "rendered EKS manifest still contains release placeholders" >&2
     exit 1
   fi
+}
+
+# resolve the promoted release from the rendered api Deployment and verify all images agree
+resolve_tracked_release() {
+  local api_image
+  local repository_name
+
+  api_image="$(
+    grep -E '^[[:space:]]+image: [^[:space:]]+/distributed-job-processing-system-api:[0-9a-f]{40}$' \
+      "$rendered_manifest" |
+      head -n 1 |
+      sed -E 's/^[[:space:]]+image: //'
+  )"
+
+  if [[ -z "$api_image" ]]; then
+    echo "could not resolve the Git-tracked api release image" >&2
+    exit 1
+  fi
+
+  RELEASE_IMAGE_TAG="${api_image##*:}"
+  RELEASE_ECR_REGISTRY="${api_image%/distributed-job-processing-system-api:*}"
+
+  if [[ "$RELEASE_ECR_REGISTRY" != "$ECR_REGISTRY" ]]; then
+    echo "tracked registry ${RELEASE_ECR_REGISTRY} does not match authenticated registry ${ECR_REGISTRY}" >&2
+    exit 1
+  fi
+
+  if ! grep -Fq "distributed-jobs.dev/source-revision: ${RELEASE_IMAGE_TAG}" "$rendered_manifest"; then
+    echo "tracked source revision does not match release tag ${RELEASE_IMAGE_TAG}" >&2
+    exit 1
+  fi
+
+  for repository_name in \
+    distributed-job-processing-system-api \
+    distributed-job-processing-system-celery-worker \
+    distributed-job-processing-system-frontend; do
+    if ! grep -Fq "image: ${ECR_REGISTRY}/${repository_name}:${RELEASE_IMAGE_TAG}" "$rendered_manifest"; then
+      echo "rendered release does not use ${RELEASE_IMAGE_TAG} for ${repository_name}" >&2
+      exit 1
+    fi
+  done
+}
+
+# return success only when ECR contains every image in the promoted release
+tracked_release_images_exist() {
+  local repository_name
+
+  for repository_name in \
+    distributed-job-processing-system-api \
+    distributed-job-processing-system-celery-worker \
+    distributed-job-processing-system-frontend; do
+    if ! aws ecr describe-images \
+      --repository-name "$repository_name" \
+      --image-ids "imageTag=${RELEASE_IMAGE_TAG}" \
+      --region "$AWS_REGION" >/dev/null 2>&1; then
+      return 1
+    fi
+  done
+
+  return 0
+}
+
+# never build newer source under an older immutable release tag
+ensure_tracked_release_images() {
+  local release_source_dir
+
+  if tracked_release_images_exist; then
+    echo "verified promoted images for ${RELEASE_IMAGE_TAG} already exist in ECR"
+    return
+  fi
+
+  if [[ "$IMAGE_TAG" == "$RELEASE_IMAGE_TAG" ]]; then
+    bash "$repo_root/infra/k8s/overlays/eks/publish-images.sh"
+    return
+  fi
+
+  if ! git -C "$repo_root" cat-file -e "${RELEASE_IMAGE_TAG}^{commit}"; then
+    echo "tracked source commit ${RELEASE_IMAGE_TAG} is unavailable locally" >&2
+    echo "fetch repository history before recreating its release images" >&2
+    exit 1
+  fi
+
+  release_source_dir="$(mktemp -d)"
+  if ! git -C "$repo_root" archive "$RELEASE_IMAGE_TAG" | tar -x -C "$release_source_dir"; then
+    rm -rf "$release_source_dir"
+    echo "failed to extract tracked source commit ${RELEASE_IMAGE_TAG}" >&2
+    exit 1
+  fi
+
+  echo "publishing missing images from tracked source commit ${RELEASE_IMAGE_TAG}"
+  if ! IMAGE_TAG="$RELEASE_IMAGE_TAG" \
+    bash "$release_source_dir/infra/k8s/overlays/eks/publish-images.sh"; then
+    rm -rf "$release_source_dir"
+    exit 1
+  fi
+
+  rm -rf "$release_source_dir"
 }
 
 # inject the exact immutable api image into the one-off migration job
 render_migration_manifest() {
   sed \
-    -e "s|distributed-job-processing-system-api:latest|${ECR_REGISTRY}/distributed-job-processing-system-api:${IMAGE_TAG}|" \
+    -e "s|distributed-job-processing-system-api:latest|${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-api:${RELEASE_IMAGE_TAG}|" \
     "$repo_root/infra/k8s/base/database-migration-job.yaml" \
     >"$rendered_migration_manifest"
 
   if grep -Fq "distributed-job-processing-system-api:latest" "$rendered_migration_manifest"; then
     echo "rendered migration manifest still contains the local api image" >&2
-    exit 1
-  fi
-}
-
-# inject the selected ECR registry and immutable release into the EKS Application
-render_argocd_application() {
-  # sed reads the tracked template and replaces every deployment marker in its output
-  # - deployment-registry becomes the authenticated account's ECR registry
-  # - deployment-placeholder becomes the full Git SHA used by images and annotations
-  # the redirected output is temporary, so the tracked template remains unchanged
-  sed \
-    -e "s|deployment-registry|${ECR_REGISTRY}|g" \
-    -e "s|deployment-placeholder|${IMAGE_TAG}|g" \
-    "$repo_root/infra/k8s/argocd/eks-application.yaml" \
-    >"$rendered_argocd_application"
-
-  if grep -Eq "deployment-(registry|placeholder)" "$rendered_argocd_application"; then
-    echo "rendered EKS Application still contains deployment markers" >&2
     exit 1
   fi
 }
@@ -188,8 +261,10 @@ require_command helm
 require_command kubectl
 require_command openssl
 require_command bash
+require_command git
 require_command grep
 require_command sed
+require_command tar
 
 export AWS_ACCOUNT_ID AWS_REGION IMAGE_TAG
 
@@ -235,11 +310,15 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 echo "creating application secret when absent"
 create_application_secret
 
-echo "publishing application images to ECR"
-bash "$repo_root/infra/k8s/overlays/eks/publish-images.sh"
-
-echo "rendering EKS overlay for commit ${IMAGE_TAG}"
+echo "rendering Git-tracked EKS release"
 render_deployment_manifest
+resolve_tracked_release
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  echo "image_tag=${RELEASE_IMAGE_TAG}" >>"$GITHUB_OUTPUT"
+fi
+
+echo "ensuring promoted application images exist in ECR"
+ensure_tracked_release_images
 
 # apply only the resources required by the migration, then wait for postgres
 echo "preparing database migration"
@@ -263,17 +342,16 @@ done
 
 # register the desired state only after the direct rollout is healthy
 echo "registering EKS Argo CD application"
-render_argocd_application
-kubectl apply --filename "$rendered_argocd_application"
+kubectl apply --filename "$repo_root/infra/k8s/argocd/eks-application.yaml"
 kubectl get application dist-jobs-eks --namespace "$ARGOCD_NAMESPACE"
 
 echo "verifying immutable application images"
-verify_deployment_image "api" "api" "${ECR_REGISTRY}/distributed-job-processing-system-api:${IMAGE_TAG}"
-verify_deployment_image "celery-worker" "celery-worker" "${ECR_REGISTRY}/distributed-job-processing-system-celery-worker:${IMAGE_TAG}"
-verify_deployment_image "frontend" "frontend" "${ECR_REGISTRY}/distributed-job-processing-system-frontend:${IMAGE_TAG}"
+verify_deployment_image "api" "api" "${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-api:${RELEASE_IMAGE_TAG}"
+verify_deployment_image "celery-worker" "celery-worker" "${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-celery-worker:${RELEASE_IMAGE_TAG}"
+verify_deployment_image "frontend" "frontend" "${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-frontend:${RELEASE_IMAGE_TAG}"
 
 echo "application stack deployed"
-echo "deployed immutable image tag: ${IMAGE_TAG}"
+echo "deployed immutable image tag: ${RELEASE_IMAGE_TAG}"
 kubectl get pods,services,ingress --namespace "$NAMESPACE"
 
 echo "monitoring stack deployed"

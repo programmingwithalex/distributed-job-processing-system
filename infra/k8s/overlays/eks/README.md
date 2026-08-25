@@ -18,9 +18,9 @@ After Terraform creates the cluster, deploy the complete application stack with:
 bash infra/k8s/overlays/eks/deploy-eks-application-stack.sh
 ```
 
-The script updates kubeconfig, installs ingress-nginx, monitoring, and the pinned Argo CD control plane, creates the namespace and application secret when absent, publishes images to ECR, applies the EKS overlay, and waits for workload rollouts. It preserves an existing `application-secrets` Secret so rerunning it does not rotate database credentials.
+The script updates kubeconfig, installs ingress-nginx, monitoring, and the pinned Argo CD control plane, creates the namespace and application secret when absent, ensures the Git-tracked release images exist in ECR, applies the EKS overlay, and waits for workload rollouts. It preserves an existing `application-secrets` Secret so rerunning it does not rotate database credentials.
 
-Argo CD is installed into the `argocd` namespace. After the existing direct rollout is healthy, the script registers the manual-sync `dist-jobs-eks` Application with the selected ECR registry and immutable Git SHA. Automated synchronization is intentionally omitted so EKS changes require explicit review and manual approval.
+The EKS overlay records the promoted ECR registry and immutable image SHA in Git. Argo CD is installed into the `argocd` namespace and compares that tracked release with the cluster. After the existing direct rollout is healthy, the script registers the manual-sync `dist-jobs-eks` Application. Automated synchronization is intentionally omitted so EKS changes require explicit review and manual approval.
 
 ### Refresh Kubeconfig After Cluster Recreation
 
@@ -158,4 +158,4 @@ docker push "$ECR_REGISTRY/distributed-job-processing-system-celery-worker:$IMAG
 docker push "$ECR_REGISTRY/distributed-job-processing-system-frontend:$IMAGE_TAG"
 ```
 
-The complete deployment helper copies the Kubernetes manifests to a temporary directory, injects the ECR registry and commit SHA there, applies that rendered overlay, and removes the temporary files. The committed [kustomization.yaml](./kustomization.yaml) intentionally retains deployment placeholders.
+The complete deployment helper renders the release recorded in [kustomization.yaml](./kustomization.yaml) without replacing its registry or image SHA. If those immutable images are missing during environment recreation, the helper extracts that exact source commit from Git and republishes the release before applying the overlay.

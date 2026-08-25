@@ -41,6 +41,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
+          # recreating missing promoted images may require their earlier source commit
+          fetch-depth: 0
 
       # workflow_dispatch may receive a moving branch or tag, so capture the exact checked-out commit
       - name: Resolve deployment revision
@@ -88,9 +90,9 @@ jobs:
         run: bash infra/terraform/verify-resources.sh
 
       - name: Deploy application stack
+        id: application
         env:
-          # tie every pushed image to the exact commit selected for this dispatch
-          # the deploy summary and Kubernetes annotation use this same immutable revision
+          # identify the checked-out source so the script can preserve image provenance
           IMAGE_TAG: ${{ steps.revision.outputs.sha }}
         run: bash infra/k8s/overlays/eks/deploy-eks-application-stack.sh
 
@@ -115,6 +117,6 @@ jobs:
             echo "## EKS deployment"
             echo
             echo "- Cluster: \`dist-jobs\`"
-            echo "- Image tag: \`${{ steps.revision.outputs.sha }}\`"
+            echo "- Image tag: \`${{ steps.application.outputs.image_tag }}\`"
             echo "- Endpoint: http://${{ steps.ingress.outputs.host }}/"
           } >> "$GITHUB_STEP_SUMMARY"
