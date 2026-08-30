@@ -205,6 +205,9 @@ frontend/test-results/
 .cursorignore
 .cursorindexingignore
 
+# Local learning notes
+/LEARNING_TOPICS.md
+
 # Terraform
 infra/terraform/.terraform/
 infra/terraform/terraform.tfstate  # record of the current state of the infrastructure

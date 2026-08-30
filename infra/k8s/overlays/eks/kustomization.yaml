@@ -1,4 +1,6 @@
 # EKS overlay that reuses the shared base and overrides only environment-specific values
+# The dist-jobs-eks Argo CD Application in infra/k8s/argocd/eks-application.yaml
+# tracks this directory on main and renders this file as the cluster's desired state.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: dist-jobs

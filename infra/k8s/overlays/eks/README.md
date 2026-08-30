@@ -20,7 +20,28 @@ bash infra/k8s/overlays/eks/deploy-eks-application-stack.sh
 
 The script updates kubeconfig, installs ingress-nginx, monitoring, and the pinned Argo CD control plane, creates the namespace and application secret when absent, ensures the Git-tracked release images exist in ECR, applies the EKS overlay, and waits for workload rollouts. It preserves an existing `application-secrets` Secret so rerunning it does not rotate database credentials.
 
-The EKS overlay records the promoted ECR registry and immutable image SHA in Git. Argo CD is installed into the `argocd` namespace and compares that tracked release with the cluster. After the existing direct rollout is healthy, the script registers the manual-sync `dist-jobs-eks` Application. Automated synchronization is intentionally omitted so EKS changes require explicit review and manual approval.
+The EKS overlay records the promoted ECR registry and immutable image SHA in Git. Kustomize centralizes that release selection and applies EKS-specific configuration while preserving the shared base manifests. Without it, each promotion would require duplicating or editing image references across multiple raw Deployment manifests.
+
+Argo CD is installed into the `argocd` namespace and compares that tracked release with the cluster. After the existing direct rollout is healthy, the script registers the manual-sync `dist-jobs-eks` Application. Automated synchronization is intentionally omitted so EKS changes require explicit review and manual approval.
+
+## Promote a Release
+
+The `Promote EKS Release` GitHub Actions workflow turns one source revision into a reviewable release:
+
+1. Resolve the selected Git ref to its full commit SHA.
+2. Publish the API, Celery worker, and frontend images to ECR under that immutable SHA.
+3. Create a branch from `main`, update the Kustomize source-revision annotation and all three image tags, validate the rendered manifest, and open a pull request.
+4. After CI passes and the pull request is reviewed and merged, manually sync the `dist-jobs-eks` Application in Argo CD with pruning disabled.
+
+The workflow requires a fine-grained personal access token because GitHub suppresses `pull_request` workflow events for pull requests created by the repository's `GITHUB_TOKEN`. Limit the token to this repository with **Contents: Read and write** and **Pull requests: Read and write**, then store it as the `RELEASE_PR_TOKEN` Actions repository secret:
+
+```bash
+gh secret set RELEASE_PR_TOKEN
+```
+
+Enter the token directly at the CLI prompt. Do not store it in a tracked file. AWS authentication remains separate and uses the existing OIDC role rather than long-lived AWS credentials.
+
+To promote a revision, open **Actions → Promote EKS Release → Run workflow**, enter a branch, tag, or full commit SHA in `ref`, and review the generated pull request. Rerunning the workflow for a release already recorded in the EKS overlay verifies or reuses its ECR images but does not create an empty pull request.
 
 ### Refresh Kubeconfig After Cluster Recreation
 
