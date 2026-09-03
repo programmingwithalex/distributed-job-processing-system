@@ -1,0 +1,12 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    distributed-jobs.dev/source-revision: {{ .Values.releaseTag | quote }}
+spec:
+  minAvailable: {{ .Values.api.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      app: api

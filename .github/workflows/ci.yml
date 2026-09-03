@@ -32,6 +32,9 @@ jobs:
           npx --yes prettier@3.5.3 --check \
             .github/workflows/promote-eks-release.yml \
             README.md \
+            infra/k8s/charts/distributed-jobs/Chart.yaml \
+            infra/k8s/charts/distributed-jobs/values.yaml \
+            infra/k8s/charts/distributed-jobs/values-eks.yaml \
             infra/k8s/README.md \
             infra/k8s/overlays/README.md \
             infra/k8s/overlays/eks/README.md \
@@ -49,6 +52,31 @@ jobs:
         run: |
           kubectl kustomize infra/k8s/overlays/local > /dev/null
           kubectl kustomize infra/k8s/overlays/eks > /dev/null
+
+      - name: Validate application Helm chart
+        run: |
+          chart_dir="infra/k8s/charts/distributed-jobs"
+          values_file="$chart_dir/values-eks.yaml"
+          release_sha="$(sed -n 's/^releaseTag: "\([0-9a-f]\{40\}\)"$/\1/p' "$values_file")"
+          test "$release_sha" != ""
+
+          helm lint "$chart_dir" --values "$values_file"
+
+          rendered_manifest="$(mktemp)"
+          trap 'rm -f "$rendered_manifest"' EXIT
+          helm template dist-jobs "$chart_dir" \
+            --namespace dist-jobs \
+            --values "$values_file" > "$rendered_manifest"
+
+          grep -Fq "distributed-jobs.dev/source-revision: \"$release_sha\"" "$rendered_manifest"
+          grep -Fq '"legendFormat": "{{route}}"' "$rendered_manifest"
+
+          for repository in \
+            distributed-job-processing-system-api \
+            distributed-job-processing-system-celery-worker \
+            distributed-job-processing-system-frontend; do
+            grep -Fq "/${repository}:${release_sha}" "$rendered_manifest"
+          done
 
       # -n checks for syntax errors without executing the scripts
       - name: Validate deployment scripts
