@@ -49,22 +49,26 @@ if aws eks describe-cluster --region "$AWS_REGION" --name "$CLUSTER_NAME" >/dev/
   echo "updating kubeconfig for ${CLUSTER_NAME}"
   aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
 
-  echo "uninstalling monitoring stack"
-  helm uninstall "$MONITORING_RELEASE" \
-    --namespace "$MONITORING_NAMESPACE" \
-    --ignore-not-found \
-    --wait \
-    --timeout 10m
-  kubectl delete namespace "$MONITORING_NAMESPACE" --ignore-not-found
-  wait_for_namespace_deletion "$MONITORING_NAMESPACE"
+  if kubectl auth can-i get namespaces >/dev/null 2>&1; then
+    echo "uninstalling monitoring stack"
+    helm uninstall "$MONITORING_RELEASE" \
+      --namespace "$MONITORING_NAMESPACE" \
+      --ignore-not-found \
+      --wait \
+      --timeout 10m
+    kubectl delete namespace "$MONITORING_NAMESPACE" --ignore-not-found
+    wait_for_namespace_deletion "$MONITORING_NAMESPACE"
 
-  echo "deleting application namespace ${NAMESPACE}"
-  kubectl delete -k "$repo_root/infra/k8s/overlays/eks" --ignore-not-found
-  wait_for_namespace_deletion "$NAMESPACE"
+    echo "deleting application namespace ${NAMESPACE}"
+    kubectl delete namespace "$NAMESPACE" --ignore-not-found
+    wait_for_namespace_deletion "$NAMESPACE"
 
-  echo "deleting ingress-nginx"
-  kubectl delete -f "$INGRESS_NGINX_MANIFEST" --ignore-not-found
-  wait_for_namespace_deletion ingress-nginx
+    echo "deleting ingress-nginx"
+    kubectl delete -f "$INGRESS_NGINX_MANIFEST" --ignore-not-found
+    wait_for_namespace_deletion ingress-nginx
+  else
+    echo "Kubernetes access is unavailable; skipping in-cluster cleanup before Terraform destroy"
+  fi
 else
   echo "EKS cluster ${CLUSTER_NAME} is already absent; reconciling Terraform state"
 fi
