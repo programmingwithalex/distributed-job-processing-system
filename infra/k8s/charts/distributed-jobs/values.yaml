@@ -1,0 +1,43 @@
+releaseTag: latest
+
+config:
+  appEnv: local
+  logLevel: INFO
+  apiHost: 0.0.0.0
+  apiPort: "8000"
+  defaultMaximumAttemptCount: "3"
+  apiProxyTarget: http://api:8000
+
+postgres:
+  replicaCount: 1
+  image:
+    repository: postgres
+    tag: "16"
+    pullPolicy: IfNotPresent
+
+rabbitmq:
+  replicaCount: 1
+  image:
+    repository: rabbitmq
+    tag: 3.13-management
+    pullPolicy: IfNotPresent
+
+api:
+  replicaCount: 2
+  podDisruptionBudget:
+    minAvailable: 1
+  image:
+    repository: distributed-job-processing-system-api
+    pullPolicy: IfNotPresent
+
+celeryWorker:
+  replicaCount: 1
+  image:
+    repository: distributed-job-processing-system-celery_worker
+    pullPolicy: IfNotPresent
+
+frontend:
+  replicaCount: 1
+  image:
+    repository: distributed-job-processing-system-frontend
+    pullPolicy: IfNotPresent

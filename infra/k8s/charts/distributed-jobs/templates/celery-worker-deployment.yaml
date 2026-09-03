@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    distributed-jobs.dev/source-revision: {{ .Values.releaseTag | quote }}
+spec:
+  replicas: {{ .Values.celeryWorker.replicaCount }}
+  selector:
+    matchLabels:
+      app: celery-worker
+  template:
+    metadata:
+      annotations:
+        distributed-jobs.dev/source-revision: {{ .Values.releaseTag | quote }}
+      labels:
+        app: celery-worker
+    spec:
+      containers:
+        - name: celery-worker
+          image: "{{ .Values.celeryWorker.image.repository }}:{{ .Values.releaseTag }}"
+          imagePullPolicy: {{ .Values.celeryWorker.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: application-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: application-secrets
+                  key: DATABASE_URL
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: application-secrets
+                  key: CELERY_BROKER_URL

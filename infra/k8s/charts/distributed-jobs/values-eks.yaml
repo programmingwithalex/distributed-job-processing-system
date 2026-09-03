@@ -1,0 +1,16 @@
+releaseTag: "c026b07cf003adcb8edc991b0d1ae38bac18d409"
+
+config:
+  appEnv: eks
+
+api:
+  image:
+    repository: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-api
+
+celeryWorker:
+  image:
+    repository: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-celery-worker
+
+frontend:
+  image:
+    repository: 257492816994.dkr.ecr.us-east-1.amazonaws.com/distributed-job-processing-system-frontend

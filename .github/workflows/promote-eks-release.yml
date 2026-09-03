@@ -1,9 +1,13 @@
 name: Promote EKS Release
 
-# Publishes the API, Celery worker, and frontend images for a selected Git revision
-# under one immutable commit SHA. It then updates the Git-tracked EKS Kustomize
-# release on a new branch, validates the rendered manifests, and opens a promotion
-# pull request. Deployment remains a separate manual Argo CD sync after review and merge.
+# release flow:
+# 1. resolve the selected Git ref to one immutable commit SHA
+# 2. authenticate to GitHub and AWS through short-lived credentials
+# 3. publish the API, Celery worker, and frontend images with the same SHA tag
+# 4. branch from main and update the Git-tracked EKS Helm release
+# 5. lint and render the chart to verify that the SHA reaches every workload
+# 6. open a promotion pull request only when the desired release changed
+# 7. deploy separately by manually syncing Argo CD after review and merge
 on:
   workflow_dispatch:
     inputs:
@@ -30,13 +34,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out release source
+        # check out the application revision whose images will be published
+        uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Resolve release revision
+        # expose the full SHA and deterministic promotion metadata to later steps
         id: release
         run: |
           release_sha="$(git rev-parse HEAD)"
@@ -52,6 +59,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Validate promotion credentials
+        # fail before publishing when either required credential is unavailable
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
         run: |
@@ -59,61 +67,72 @@ jobs:
           test -n "$GH_TOKEN"
           gh auth status
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - name: Configure AWS credentials
+        # exchange GitHub's OIDC token for temporary AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.AWS_GITHUB_ACTIONS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Publish immutable release images
+        # build and push all application images as one immutable release bundle
         env:
           IMAGE_TAG: ${{ steps.release.outputs.sha }}
         run: bash infra/k8s/overlays/eks/publish-images.sh
 
       - name: Create promotion branch
-        id: branch
+        # switch from the selected source revision to main's GitOps desired state
         env:
           PROMOTION_BRANCH: ${{ steps.release.outputs.branch }}
-          RELEASE_SHA: ${{ steps.release.outputs.sha }}
         run: |
           git fetch origin main
           git switch --create "$PROMOTION_BRANCH" origin/main
 
-          release_file="infra/k8s/overlays/eks/kustomization.yaml"
-          occurrence_count="$(awk -v sha="$RELEASE_SHA" '{ count += gsub(sha, sha) } END { print count + 0 }' "$release_file")"
-          if [[ "$occurrence_count" -eq 4 ]]; then
-            echo "already_tracked=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "already_tracked=false" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Read Git-tracked EKS release
+        # read the current value semantically instead of parsing YAML as text
+        id: current_release
+        uses: mikefarah/yq@v4.47.2
+        with:
+          cmd: >-
+            yq -r '.releaseTag'
+            infra/k8s/charts/distributed-jobs/values-eks.yaml
 
       - name: Update Git-tracked EKS release
-        if: steps.branch.outputs.already_tracked != 'true'
+        # skip the write when already current because yq can normalize YAML whitespace
+        if: steps.current_release.outputs.result != steps.release.outputs.sha
         uses: mikefarah/yq@v4.47.2
         env:
           RELEASE_SHA: ${{ steps.release.outputs.sha }}
         with:
           cmd: >-
             yq -i
-            '.commonAnnotations."distributed-jobs.dev/source-revision" = strenv(RELEASE_SHA) |
-            .images[].newTag = strenv(RELEASE_SHA)'
-            infra/k8s/overlays/eks/kustomization.yaml
+            '.releaseTag = strenv(RELEASE_SHA)'
+            infra/k8s/charts/distributed-jobs/values-eks.yaml
 
-      - uses: azure/setup-kubectl@v4
+      - name: Set up Helm
+        # pin the same Helm version used by CI
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
 
       - name: Validate promoted release manifest
+        # validate both chart structure and release SHA propagation before committing
         id: manifest
         env:
           RELEASE_SHA: ${{ steps.release.outputs.sha }}
         run: |
-          release_file="infra/k8s/overlays/eks/kustomization.yaml"
-          occurrence_count="$(awk -v sha="$RELEASE_SHA" '{ count += gsub(sha, sha) } END { print count + 0 }' "$release_file")"
-          test "$occurrence_count" -eq 4
+          chart_dir="infra/k8s/charts/distributed-jobs"
+          values_file="$chart_dir/values-eks.yaml"
+
+          helm lint "$chart_dir" --values "$values_file"
 
           rendered_manifest="$(mktemp)"
           trap 'rm -f "$rendered_manifest"' EXIT
-          kubectl kustomize infra/k8s/overlays/eks > "$rendered_manifest"
+          helm template dist-jobs "$chart_dir" \
+            --namespace dist-jobs \
+            --values "$values_file" > "$rendered_manifest"
 
-          grep -Fq "distributed-jobs.dev/source-revision: $RELEASE_SHA" "$rendered_manifest"
+          grep -Fq "distributed-jobs.dev/source-revision: \"$RELEASE_SHA\"" "$rendered_manifest"
           for repository in \
             distributed-job-processing-system-api \
             distributed-job-processing-system-celery-worker \
@@ -121,14 +140,16 @@ jobs:
             grep -Fq "/${repository}:${RELEASE_SHA}" "$rendered_manifest"
           done
 
-          if git diff --quiet -- "$release_file"; then
+          # use the values-file diff as the authority for whether promotion is needed
+          if git diff --quiet -- "$values_file"; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "Release $RELEASE_SHA is already tracked by the EKS overlay"
+            echo "Release $RELEASE_SHA is already tracked by the EKS Helm values"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Commit and push promotion
+        # persist only the desired-state change and publish its release branch
         if: steps.manifest.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
@@ -140,7 +161,7 @@ jobs:
           test "$(git config user.name)" = "programmingwithalex"
           test "$(git config user.email)" = "programmingwithalex3@gmail.com"
 
-          git add -- infra/k8s/overlays/eks/kustomization.yaml
+          git add -- infra/k8s/charts/distributed-jobs/values-eks.yaml
           git -c user.name="programmingwithalex" \
             -c user.email="programmingwithalex3@gmail.com" \
             commit -m "chore: promote EKS release ${RELEASE_SHA:0:12}"
@@ -149,6 +170,7 @@ jobs:
           git push --set-upstream origin "$PROMOTION_BRANCH"
 
       - name: Open promotion pull request
+        # request review instead of mutating the cluster directly
         if: steps.manifest.outputs.changed == 'true'
         id: pull_request
         env:
@@ -177,6 +199,7 @@ jobs:
           echo "url=$pr_url" >> "$GITHUB_OUTPUT"
 
       - name: Write promotion summary
+        # report either the pull request or the already-promoted no-op result
         if: always() && steps.manifest.outcome == 'success'
         env:
           CHANGED: ${{ steps.manifest.outputs.changed }}

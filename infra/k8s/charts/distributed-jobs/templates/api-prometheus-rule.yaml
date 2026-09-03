@@ -1,0 +1,32 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: api
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    distributed-jobs.dev/source-revision: {{ .Values.releaseTag | quote }}
+  labels:
+    release: monitoring
+spec:
+  groups:
+    - name: api.availability
+      rules:
+        - alert: APIAllTargetsDown
+          expr: absent(up{job="api"}) or max(up{job="api"}) == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: All API metrics targets are unavailable
+            description: Prometheus has been unable to scrape any API target for five minutes.
+        - alert: APIHighHTTP5xxErrorRate
+          expr: |
+            sum(rate(api_http_requests_total{status_code=~"5.."}[5m]))
+              /
+            sum(rate(api_http_requests_total[5m])) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: API HTTP 5xx error rate is elevated
+            description: More than 5% of API requests have returned HTTP 5xx responses for ten minutes.

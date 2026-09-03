@@ -9,8 +9,12 @@ spec:
   source:
     repoURL: https://github.com/programmingwithalex/distributed-job-processing-system.git
     targetRevision: main
-    # Argo CD finds this directory's kustomization.yaml and follows its resource references
-    path: infra/k8s/overlays/eks
+    # Argo CD renders this chart with the Git-tracked EKS release values
+    path: infra/k8s/charts/distributed-jobs
+    helm:
+      releaseName: dist-jobs
+      valueFiles:
+        - values-eks.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: dist-jobs
