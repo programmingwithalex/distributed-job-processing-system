@@ -19,15 +19,15 @@
 #    controllers, UI/API Service, repo server, Dex, dedicated Redis, RBAC, and config.
 # 8. Creates the application namespace and, only when absent, generates and stores
 #    PostgreSQL and Celery connection values in the application-secrets Secret.
-# 9. Builds the EKS Kustomize overlay and resolves its Git-tracked ECR registry and
-#    immutable release tag.
+# 9. Renders the application Helm chart with its EKS values and resolves the
+#    Git-tracked ECR registry and immutable release tag.
 # 10. Reuses promoted images already in ECR or rebuilds missing images from the exact
 #     tracked source commit without tagging newer source as an older release.
 # 11. Deploys PostgreSQL first and waits for it before running database migrations.
 # 12. Renders the one-off migration Job with the immutable API image, recreates the
 #     Job with Kubernetes Service environment injection disabled, waits for completion,
 #     and prints its logs if it fails or times out.
-# 13. Directly applies the rendered EKS application and monitoring manifests, then
+# 13. Directly applies the rendered Helm application and monitoring manifests, then
 #     waits for PostgreSQL, RabbitMQ, API, worker, and frontend rollouts.
 # 14. Registers the manual-sync dist-jobs-eks Argo CD Application only after the
 #     direct rollout is healthy; Argo CD does not take sync control yet.
@@ -56,9 +56,12 @@ MONITORING_CHART_VERSION="87.21.0"
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-argocd}"
 ARGOCD_RELEASE="${ARGOCD_RELEASE:-argocd}"
 ARGOCD_CHART_VERSION="10.3.3"
+APPLICATION_RELEASE="${APPLICATION_RELEASE:-dist-jobs}"
+APPLICATION_CHART="$repo_root/infra/k8s/charts/distributed-jobs"
+APPLICATION_VALUES="$APPLICATION_CHART/values-eks.yaml"
 INGRESS_NGINX_MANIFEST="https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml"
 
-# render account-specific values to a temporary file so tracked manifests stay unchanged
+# render the Git-tracked Helm release to a temporary manifest
 rendered_manifest="$(mktemp)"
 rendered_migration_manifest="$(mktemp)"
 trap 'rm -f "$rendered_manifest" "$rendered_migration_manifest"' EXIT
@@ -93,12 +96,14 @@ create_application_secret() {
     --from-literal=CELERY_BROKER_URL='amqp://guest:guest@rabbitmq:5672//'
 }
 
-# render the exact release recorded in the Git-tracked EKS overlay
+# render the exact release recorded in the Git-tracked EKS Helm values
 render_deployment_manifest() {
-  kubectl kustomize "$repo_root/infra/k8s/overlays/eks" >"$rendered_manifest"
+  helm template "$APPLICATION_RELEASE" "$APPLICATION_CHART" \
+    --namespace "$NAMESPACE" \
+    --values "$APPLICATION_VALUES" >"$rendered_manifest"
 
   if grep -Eq "deployment-placeholder|000000000000" "$rendered_manifest"; then
-    echo "rendered EKS manifest still contains release placeholders" >&2
+    echo "rendered EKS Helm release still contains placeholders" >&2
     exit 1
   fi
 }
@@ -109,10 +114,10 @@ resolve_tracked_release() {
   local repository_name
 
   api_image="$(
-    grep -E '^[[:space:]]+image: [^[:space:]]+/distributed-job-processing-system-api:[0-9a-f]{40}$' \
+    grep -E '^[[:space:]]+image: "[^[:space:]]+/distributed-job-processing-system-api:[0-9a-f]{40}"$' \
       "$rendered_manifest" |
       head -n 1 |
-      sed -E 's/^[[:space:]]+image: //'
+      sed -E 's/^[[:space:]]+image: "([^"]+)"$/\1/'
   )"
 
   if [[ -z "$api_image" ]]; then
@@ -128,7 +133,7 @@ resolve_tracked_release() {
     exit 1
   fi
 
-  if ! grep -Fq "distributed-jobs.dev/source-revision: ${RELEASE_IMAGE_TAG}" "$rendered_manifest"; then
+  if ! grep -Fq "distributed-jobs.dev/source-revision: \"${RELEASE_IMAGE_TAG}\"" "$rendered_manifest"; then
     echo "tracked source revision does not match release tag ${RELEASE_IMAGE_TAG}" >&2
     exit 1
   fi
@@ -137,7 +142,7 @@ resolve_tracked_release() {
     distributed-job-processing-system-api \
     distributed-job-processing-system-celery-worker \
     distributed-job-processing-system-frontend; do
-    if ! grep -Fq "image: ${ECR_REGISTRY}/${repository_name}:${RELEASE_IMAGE_TAG}" "$rendered_manifest"; then
+    if ! grep -Fq "image: \"${ECR_REGISTRY}/${repository_name}:${RELEASE_IMAGE_TAG}\"" "$rendered_manifest"; then
       echo "rendered release does not use ${RELEASE_IMAGE_TAG} for ${repository_name}" >&2
       exit 1
     fi
@@ -311,7 +316,7 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 echo "creating application secret when absent"
 create_application_secret
 
-echo "rendering Git-tracked EKS release"
+echo "rendering Git-tracked EKS Helm release"
 render_deployment_manifest
 resolve_tracked_release
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
@@ -333,7 +338,7 @@ echo "running database migration"
 render_migration_manifest
 run_database_migration
 
-echo "applying rendered EKS overlay"
+echo "applying rendered EKS Helm release"
 kubectl apply -f "$rendered_manifest"
 
 echo "waiting for application deployments"
