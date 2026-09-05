@@ -78,7 +78,7 @@ jobs:
           # run PostgreSQL first, the migration hook second, and application workloads last
           grep -Fq 'argocd.argoproj.io/hook: Sync' "$rendered_manifest"
           grep -Fq 'argocd.argoproj.io/hook-delete-policy: BeforeHookCreation' "$rendered_manifest"
-          test "$(grep -Fc 'argocd.argoproj.io/sync-wave: \"-2\"' "$rendered_manifest")" -eq 2
+          test "$(grep -Fc 'argocd.argoproj.io/sync-wave: "-2"' "$rendered_manifest")" -eq 2
           grep -Fq 'argocd.argoproj.io/sync-wave: "-1"' "$rendered_manifest"
 
           # require one atomic immutable release across every application image
