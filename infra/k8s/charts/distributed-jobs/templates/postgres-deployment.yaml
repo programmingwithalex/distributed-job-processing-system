@@ -4,6 +4,8 @@ metadata:
   name: postgres
   namespace: {{ .Release.Namespace }}
   annotations:
+    # create PostgreSQL before the migration Job at wave -1 and workloads at wave 0
+    argocd.argoproj.io/sync-wave: "-2"
     distributed-jobs.dev/source-revision: {{ .Values.releaseTag | quote }}
 spec:
   replicas: {{ .Values.postgres.replicaCount }}

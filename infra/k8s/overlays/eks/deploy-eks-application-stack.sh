@@ -24,9 +24,8 @@
 # 10. Reuses promoted images already in ECR or rebuilds missing images from the exact
 #     tracked source commit without tagging newer source as an older release.
 # 11. Deploys PostgreSQL first and waits for it before running database migrations.
-# 12. Renders the one-off migration Job with the immutable API image, recreates the
-#     Job with Kubernetes Service environment injection disabled, waits for completion,
-#     and prints its logs if it fails or times out.
+# 12. Renders the chart-owned migration Job with the immutable API image, recreates
+#     it for bootstrap, waits for completion, and prints its logs on failure.
 # 13. Directly applies the rendered Helm application and monitoring manifests, then
 #     waits for PostgreSQL, RabbitMQ, API, worker, and frontend rollouts.
 # 14. Registers the manual-sync dist-jobs-eks Argo CD Application only after the
@@ -215,15 +214,16 @@ ensure_tracked_release_images() {
   rm -rf "$release_source_dir"
 }
 
-# inject the exact immutable api image into the one-off migration job
+# render the same migration Job used by Argo CD release synchronization
 render_migration_manifest() {
-  sed \
-    -e "s|distributed-job-processing-system-api:latest|${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-api:${RELEASE_IMAGE_TAG}|" \
-    "$repo_root/infra/k8s/base/database-migration-job.yaml" \
-    >"$rendered_migration_manifest"
+  helm template "$APPLICATION_RELEASE" "$APPLICATION_CHART" \
+    --namespace "$NAMESPACE" \
+    --values "$APPLICATION_VALUES" \
+    --show-only templates/database-migration-job.yaml >"$rendered_migration_manifest"
 
-  if grep -Fq "distributed-job-processing-system-api:latest" "$rendered_migration_manifest"; then
-    echo "rendered migration manifest still contains the local api image" >&2
+  if ! grep -Fq "image: \"${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-api:${RELEASE_IMAGE_TAG}\"" \
+    "$rendered_migration_manifest"; then
+    echo "rendered migration manifest does not use the tracked api image" >&2
     exit 1
   fi
 }

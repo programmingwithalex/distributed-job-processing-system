@@ -18,11 +18,11 @@ After Terraform creates the cluster, deploy the complete application stack with:
 bash infra/k8s/overlays/eks/deploy-eks-application-stack.sh
 ```
 
-The script updates kubeconfig, installs ingress-nginx, monitoring, and the pinned Argo CD control plane, creates the namespace and application secret when absent, ensures the Git-tracked release images exist in ECR, applies the EKS overlay, and waits for workload rollouts. It preserves an existing `application-secrets` Secret so rerunning it does not rotate database credentials.
+The script updates kubeconfig, installs ingress-nginx, monitoring, and the pinned Argo CD control plane, creates the namespace and application secret when absent, ensures the Git-tracked release images exist in ECR, bootstraps the Helm release, and waits for workload rollouts. It preserves an existing `application-secrets` Secret so rerunning it does not rotate database credentials.
 
-The EKS overlay records the promoted ECR registry and immutable image SHA in Git. Kustomize centralizes that release selection and applies EKS-specific configuration while preserving the shared base manifests. Without it, each promotion would require duplicating or editing image references across multiple raw Deployment manifests.
+The EKS Helm values record the promoted ECR registry and immutable image SHA in Git. The chart applies that release consistently to the API, worker, frontend, and database migration Job.
 
-Argo CD is installed into the `argocd` namespace and compares that tracked release with the cluster. After the existing direct rollout is healthy, the script registers the manual-sync `dist-jobs-eks` Application. Automated synchronization is intentionally omitted so EKS changes require explicit review and manual approval.
+Argo CD is installed into the `argocd` namespace and compares that tracked release with the cluster. During a manual sync, PostgreSQL becomes healthy at sync wave `-2`, the Alembic migration Job completes at wave `-1`, and application workloads roll out at wave `0`. The migration hook is recreated before each release so its immutable Pod template can use the promoted API image. Automated synchronization is intentionally omitted so EKS changes require explicit review and manual approval.
 
 ## Promote a Release
 
@@ -30,8 +30,8 @@ The `Promote EKS Release` GitHub Actions workflow turns one source revision into
 
 1. Resolve the selected Git ref to its full commit SHA.
 2. Publish the API, Celery worker, and frontend images to ECR under that immutable SHA.
-3. Create a branch from `main`, update the Kustomize source-revision annotation and all three image tags, validate the rendered manifest, and open a pull request.
-4. After CI passes and the pull request is reviewed and merged, manually sync the `dist-jobs-eks` Application in Argo CD with pruning disabled.
+3. Create a branch from `main`, update the Helm release tag, validate the rendered manifest, and open a pull request.
+4. After CI passes and the pull request is reviewed and merged, manually sync the `dist-jobs-eks` Application in Argo CD with pruning disabled; Argo CD runs the migration hook before rolling out the application workloads.
 
 The workflow requires a fine-grained personal access token because GitHub suppresses `pull_request` workflow events for pull requests created by the repository's `GITHUB_TOKEN`. Limit the token to this repository with **Contents: Read and write** and **Pull requests: Read and write**, then store it as the `RELEASE_PR_TOKEN` Actions repository secret:
 

@@ -55,22 +55,33 @@ jobs:
 
       - name: Validate application Helm chart
         run: |
+          # resolve the chart inputs and require one immutable release SHA
           chart_dir="infra/k8s/charts/distributed-jobs"
           values_file="$chart_dir/values-eks.yaml"
           release_sha="$(sed -n 's/^releaseTag: "\([0-9a-f]\{40\}\)"$/\1/p' "$values_file")"
           test "$release_sha" != ""
 
+          # validate chart structure and values before inspecting rendered resources
           helm lint "$chart_dir" --values "$values_file"
 
+          # render the exact EKS release once for all semantic assertions below
           rendered_manifest="$(mktemp)"
           trap 'rm -f "$rendered_manifest"' EXIT
           helm template dist-jobs "$chart_dir" \
             --namespace dist-jobs \
             --values "$values_file" > "$rendered_manifest"
 
+          # preserve release provenance and monitoring dashboard templating
           grep -Fq "distributed-jobs.dev/source-revision: \"$release_sha\"" "$rendered_manifest"
           grep -Fq '"legendFormat": "{{route}}"' "$rendered_manifest"
 
+          # run PostgreSQL first, the migration hook second, and application workloads last
+          grep -Fq 'argocd.argoproj.io/hook: Sync' "$rendered_manifest"
+          grep -Fq 'argocd.argoproj.io/hook-delete-policy: BeforeHookCreation' "$rendered_manifest"
+          test "$(grep -Fc 'argocd.argoproj.io/sync-wave: \"-2\"' "$rendered_manifest")" -eq 2
+          grep -Fq 'argocd.argoproj.io/sync-wave: "-1"' "$rendered_manifest"
+
+          # require one atomic immutable release across every application image
           for repository in \
             distributed-job-processing-system-api \
             distributed-job-processing-system-celery-worker \
