@@ -1,5 +1,7 @@
 name: Promote EKS Release
 
+# handles releases after the EKS environment already deployed and running
+#
 # release flow:
 # 1. resolve the selected Git ref to one immutable commit SHA
 # 2. authenticate to GitHub and AWS through short-lived credentials

@@ -64,7 +64,8 @@ INGRESS_NGINX_MANIFEST="https://raw.githubusercontent.com/kubernetes/ingress-ngi
 # render the Git-tracked Helm release to a temporary manifest
 rendered_manifest="$(mktemp)"
 rendered_migration_manifest="$(mktemp)"
-trap 'rm -f "$rendered_manifest" "$rendered_migration_manifest"' EXIT
+rendered_postgres_manifest="$(mktemp)"
+trap 'rm -f "$rendered_manifest" "$rendered_migration_manifest" "$rendered_postgres_manifest"' EXIT
 
 RELEASE_IMAGE_TAG=""
 RELEASE_ECR_REGISTRY=""
@@ -106,6 +107,14 @@ render_deployment_manifest() {
     echo "rendered EKS Helm release still contains placeholders" >&2
     exit 1
   fi
+}
+
+render_postgres_manifest() {
+  helm template "$APPLICATION_RELEASE" "$APPLICATION_CHART" \
+    --namespace "$NAMESPACE" \
+    --values "$APPLICATION_VALUES" \
+    --show-only templates/postgres-deployment.yaml \
+    --show-only templates/postgres-service.yaml >"$rendered_postgres_manifest"
 }
 
 # resolve the promoted release from the rendered api Deployment and verify all images agree
@@ -328,10 +337,8 @@ ensure_tracked_release_images
 
 # apply only the resources required by the migration, then wait for postgres
 echo "preparing database migration"
-kubectl apply \
-  --namespace "$NAMESPACE" \
-  --filename "$repo_root/infra/k8s/base/postgres-deployment.yaml" \
-  --filename "$repo_root/infra/k8s/base/postgres-service.yaml"
+render_postgres_manifest
+kubectl apply --namespace "$NAMESPACE" --filename "$rendered_postgres_manifest"
 kubectl rollout status deployment/postgres --namespace "$NAMESPACE" --timeout=300s
 
 echo "running database migration"
