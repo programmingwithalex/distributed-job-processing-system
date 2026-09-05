@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: database-migration
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # block later sync waves until this release's schema migration succeeds
+    argocd.argoproj.io/hook: Sync
+    # fixed-name Job pod templates are immutable, so replace the prior release's Job
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    # run after PostgreSQL at wave -2 and before application workloads at wave 0
+    argocd.argoproj.io/sync-wave: "-1"
+    distributed-jobs.dev/source-revision: {{ .Values.releaseTag | quote }}
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: database-migration
+    spec:
+      enableServiceLinks: false
+      restartPolicy: Never
+      containers:
+        - name: database-migration
+          image: "{{ .Values.api.image.repository }}:{{ .Values.releaseTag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          command: ["alembic", "upgrade", "head"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: application-secrets
+                  key: DATABASE_URL
