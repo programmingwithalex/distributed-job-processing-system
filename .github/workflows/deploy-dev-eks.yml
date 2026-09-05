@@ -119,4 +119,20 @@ jobs:
             echo "- Cluster: \`dist-jobs\`"
             echo "- Image tag: \`${{ steps.application.outputs.image_tag }}\`"
             echo "- Endpoint: http://${{ steps.ingress.outputs.host }}/"
+            echo "- Argo CD: http://localhost:8081 (private; requires port forwarding)"
+            echo
+            echo "### Update kubeconfig"
+            echo
+            echo "Run from Windows PowerShell after refreshing kubeconfig:"
+            echo
+            echo '`aws eks update-kubeconfig --region us-east-1 --name dist-jobs`'
+            echo "### Access Argo CD"
+            echo
+            echo '`kubectl port-forward --namespace argocd service/argocd-server 8081:443`'
+            echo
+            echo "Username: \`admin\`"
+            echo
+            echo "Retrieve the initial admin password:"
+            echo
+            echo '`$encoded = kubectl get secret argocd-initial-admin-secret --namespace argocd --output jsonpath="{.data.password}"; [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded))`'
           } >> "$GITHUB_STEP_SUMMARY"
