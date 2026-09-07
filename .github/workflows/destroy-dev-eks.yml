@@ -1,9 +1,12 @@
 name: Destroy EKS Environment
 
-# scheduled workflows use UTC; 09:00 UTC is 04:00 EST
+# GitHub schedules use UTC; these times target EDT and run one hour earlier during EST
 on:
   schedule:
-    - cron: '0 9 * * *'
+    # Sunday through Thursday sessions end the following day at 02:00 EDT
+    - cron: '0 6 * * 1-5'
+    # Saturday session ends at 22:00 EDT
+    - cron: '0 2 * * 0'
   workflow_dispatch:
     inputs:
       confirmation:

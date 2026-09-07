@@ -51,6 +51,7 @@ module "eks" {
   eks_managed_node_groups = {
     default = {
       # use a single default node group to keep the initial cluster footprint predictable
+      capacity_type  = "SPOT"
       instance_types = var.node_instance_types
       desired_size   = var.node_desired_size
       min_size       = var.node_min_size
