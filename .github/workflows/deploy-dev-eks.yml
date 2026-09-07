@@ -1,7 +1,14 @@
 name: Deploy EKS Environment
 
-# deploy infrastructure and application code only when an operator dispatches this workflow
+# GitHub schedules use UTC; these times target EDT and run one hour earlier during EST
 on:
+  schedule:
+    # Monday through Thursday at 20:45 EDT
+    - cron: '45 0 * * 2-5'
+    # Saturday at 14:00 EDT
+    - cron: '0 18 * * 6'
+    # Sunday at 12:00 EDT
+    - cron: '0 16 * * 0'
   workflow_dispatch:
     inputs:
       ref:
@@ -40,7 +47,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          # scheduled runs have no workflow input, so deploy the default branch
+          ref: ${{ inputs.ref || github.event.repository.default_branch }}
           # recreating missing promoted images may require their earlier source commit
           fetch-depth: 0
 
