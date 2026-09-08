@@ -1,21 +1,21 @@
 # EKS Image Publishing
 
-Before applying the EKS overlay, publish the three application images to Amazon ECR.
+Before installing the EKS Helm release, publish the three application images to Amazon ECR.
 
 Quick start:
 
 ```bash
-bash infra/k8s/overlays/eks/publish-images.sh
+bash infra/k8s/environments/eks/publish-images.sh
 ```
 
-The script publishes images under the current commit's full SHA. It does not modify the tracked Kustomize overlay.
+The script publishes images under the current commit's full SHA. It does not modify the tracked Helm values files.
 
 For cluster creation, deployment, and EKS teardown, use [DEPLOYMENT.md](./DEPLOYMENT.md).
 
 After Terraform creates the cluster, deploy the complete application stack with:
 
 ```bash
-bash infra/k8s/overlays/eks/deploy-eks-application-stack.sh
+bash infra/k8s/environments/eks/deploy-eks-application-stack.sh
 ```
 
 The script updates kubeconfig, installs ingress-nginx, monitoring, and the pinned Argo CD control plane, creates the namespace and application secret when absent, ensures the Git-tracked release images exist in ECR, bootstraps the Helm release, and waits for workload rollouts. It preserves an existing `application-secrets` Secret so rerunning it does not rotate database credentials.
@@ -23,6 +23,20 @@ The script updates kubeconfig, installs ingress-nginx, monitoring, and the pinne
 The EKS Helm values record the promoted ECR registry and immutable image SHA in Git. The chart applies that release consistently to the API, worker, frontend, and database migration Job.
 
 Argo CD is installed into the `argocd` namespace and compares that tracked release with the cluster. During a manual sync, PostgreSQL becomes healthy at sync wave `-2`, the Alembic migration Job completes at wave `-1`, and application workloads roll out at wave `0`. The migration hook is recreated before each release so its immutable Pod template can use the promoted API image. Automated synchronization is intentionally omitted so EKS changes require explicit review and manual approval.
+
+## Progressive Delivery
+
+The bootstrap scripts install pinned Argo Rollouts into the `argo-rollouts` namespace before applying the application chart. The API is an Argo `Rollout`, while the other workloads remain Kubernetes `Deployment` resources.
+
+After an approved EKS release pull request is merged and the `dist-jobs-eks` Argo CD Application is manually synchronized, Argo Rollouts sends `20%` of API ingress traffic to the canary, then `50%`. At each weight it queries Prometheus twice at 30-second intervals. The canary promotes to the next step when its HTTP 5xx rate is at or below `5%`; two failed measurements roll back to the stable ReplicaSet. The analysis applies only to the `api-canary` Service, not combined stable and canary traffic. An idle canary evaluates as a zero error rate.
+
+Inspect rollout state with native resources:
+
+```bash
+kubectl get rollout api --namespace dist-jobs
+kubectl get analysisrun --namespace dist-jobs
+kubectl describe rollout api --namespace dist-jobs
+```
 
 ## Promote a Release
 
@@ -41,7 +55,7 @@ gh secret set RELEASE_PR_TOKEN
 
 Enter the token directly at the CLI prompt. Do not store it in a tracked file. AWS authentication remains separate and uses the existing OIDC role rather than long-lived AWS credentials.
 
-To promote a revision, open **Actions → Promote EKS Release → Run workflow**, enter a branch, tag, or full commit SHA in `ref`, and review the generated pull request. Rerunning the workflow for a release already recorded in the EKS overlay verifies or reuses its ECR images but does not create an empty pull request.
+To promote a revision, open **Actions → Promote EKS Release → Run workflow**, enter a branch, tag, or full commit SHA in `ref`, and review the generated pull request. Rerunning the workflow for a release already recorded in the EKS Helm values verifies or reuses its ECR images but does not create an empty pull request.
 
 ### Refresh Kubeconfig After Cluster Recreation
 
@@ -77,7 +91,7 @@ flowchart LR
 3. The Prometheus Pod stores the scraped time series. Grafana queries those time series through its internal Prometheus datasource to render the dashboard panels. The browser sends dashboard requests only to Grafana; Grafana acts as a proxy and sends each PromQL query to the internal Prometheus Service, so the browser never connects to the Prometheus Pod directly.
 4. The Grafana Pod contains the Grafana container and a dashboard sidecar container. The sidecar watches labeled dashboard ConfigMaps, copies their JSON into Grafana's provisioning directory, and Grafana loads the dashboard definition.
 
-The Git-provisioned `Distributed Jobs API` Grafana dashboard is defined in [../../monitoring/api-grafana-dashboard.yaml](../../monitoring/api-grafana-dashboard.yaml). Its **p95 Request Duration** panel estimates the request duration at or below which 95% of API requests completed during the rolling five-minute window. For example, a result of `0.5 s` means approximately 95% of observed requests completed in 500 ms or less.
+The Git-provisioned `Distributed Jobs API` Grafana dashboard is defined in [../../charts/distributed-jobs/templates/api-grafana-dashboard.yaml](../../charts/distributed-jobs/templates/api-grafana-dashboard.yaml). Its **p95 Request Duration** panel estimates the request duration at or below which 95% of API requests completed during the rolling five-minute window. For example, a result of `0.5 s` means approximately 95% of observed requests completed in 500 ms or less.
 
 The panel queries the API duration histogram with:
 
@@ -92,7 +106,7 @@ It aggregates all API routes, methods, and status codes into one whole-API laten
 
 ### Dashboard Provisioning
 
-Grafana dashboards are stored as Kubernetes ConfigMaps, so their definitions are version-controlled with the application manifests. The Grafana sidecar watches ConfigMaps in every namespace and provisions the dashboard JSON they contain. A typical setup uses one ConfigMap per dashboard, such as [../../monitoring/api-grafana-dashboard.yaml](../../monitoring/api-grafana-dashboard.yaml).
+Grafana dashboards are stored as Kubernetes ConfigMaps, so their definitions are version-controlled with the application manifests. The Grafana sidecar watches ConfigMaps in every namespace and provisions the dashboard JSON they contain. A typical setup uses one ConfigMap per dashboard, such as [../../charts/distributed-jobs/templates/api-grafana-dashboard.yaml](../../charts/distributed-jobs/templates/api-grafana-dashboard.yaml).
 
 Every dashboard ConfigMap in this deployment must include the label configured for the sidecar:
 
@@ -122,7 +136,7 @@ Teardown when you only want to remove the ECR repositories:
 ```bash
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-bash infra/k8s/overlays/eks/teardown-ecr-repos.sh "$AWS_ACCOUNT_ID" us-east-1
+bash infra/k8s/environments/eks/teardown-ecr-repos.sh "$AWS_ACCOUNT_ID" us-east-1
 ```
 
 ## Prerequisites
@@ -137,7 +151,7 @@ bash infra/k8s/overlays/eks/teardown-ecr-repos.sh "$AWS_ACCOUNT_ID" us-east-1
 Run the helper from a Bash shell such as WSL:
 
 ```bash
-bash infra/k8s/overlays/eks/publish-images.sh
+bash infra/k8s/environments/eks/publish-images.sh
 ```
 
 The script uses the current Git commit's full 40-character SHA as its image tag. `IMAGE_TAG` must also be a full lowercase commit SHA when supplied explicitly.
@@ -179,4 +193,4 @@ docker push "$ECR_REGISTRY/distributed-job-processing-system-celery-worker:$IMAG
 docker push "$ECR_REGISTRY/distributed-job-processing-system-frontend:$IMAGE_TAG"
 ```
 
-The complete deployment helper renders the release recorded in [kustomization.yaml](./kustomization.yaml) without replacing its registry or image SHA. If those immutable images are missing during environment recreation, the helper extracts that exact source commit from Git and republishes the release before applying the overlay.
+The complete deployment helper renders the release recorded in [../../charts/distributed-jobs/values-eks.yaml](../../charts/distributed-jobs/values-eks.yaml) without replacing its registry or image SHA. If those immutable images are missing during environment recreation, the helper extracts that exact source commit from Git and republishes the release before installing the chart.

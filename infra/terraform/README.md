@@ -1,6 +1,6 @@
 # Terraform AWS Foundation
 
-This directory recreates the AWS infrastructure that was previously proven manually with `eksctl`, ECR, and the EKS Kustomize overlay.
+This directory recreates the AWS infrastructure that was previously proven manually with `eksctl`, ECR, and the EKS Helm release.
 
 Terraform manages the AWS foundation only:
 
@@ -8,7 +8,7 @@ Terraform manages the AWS foundation only:
 - EKS cluster and managed node group
 - ECR repositories for the API, Celery worker, and frontend images
 
-Terraform does not manage Kubernetes application resources. Continue to deploy the application with [../k8s/overlays/eks/kustomization.yaml](../k8s/overlays/eks/kustomization.yaml).
+Terraform does not manage Kubernetes application resources. Deploy the application with the [../k8s/charts/distributed-jobs](../k8s/charts/distributed-jobs) Helm chart and `values-eks.yaml`.
 
 ## Files
 
@@ -48,10 +48,10 @@ GitHub Actions authenticates to AWS through OpenID Connect (OIDC). Each workflow
 
 In the repository **Settings → Secrets and variables → Actions**, create these **repository variables**:
 
-| Variable | Value |
-| --- | --- |
-| `AWS_REGION` | Target AWS region, for example `us-east-1` |
-| `TF_STATE_BUCKET` | The `state_bucket_name` from the bootstrap output |
+| Variable                      | Value                                                   |
+| ----------------------------- | ------------------------------------------------------- |
+| `AWS_REGION`                  | Target AWS region, for example `us-east-1`              |
+| `TF_STATE_BUCKET`             | The `state_bucket_name` from the bootstrap output       |
 | `AWS_GITHUB_ACTIONS_ROLE_ARN` | The `github_actions_role_arn` from the bootstrap output |
 
 The workflows assume the `AWS_GITHUB_ACTIONS_ROLE_ARN` through GitHub OIDC. Do not create `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` repository secrets. In the AWS IAM console, the GitHub OIDC trust policy is visible under the `dist-jobs-github-actions` role's **Trust relationships** tab. `TF_STATE_KEY` is defined in the workflow source as `distributed-job-processing-system/dev/terraform.tfstate`; do not create it in GitHub settings.
@@ -149,10 +149,10 @@ After apply, update kubeconfig using the output command:
 terraform -chdir=infra/terraform output -raw kubeconfig_command
 ```
 
-Then publish images and deploy the application overlay:
+Then publish images and deploy the application Helm release:
 
 ```bash
-bash infra/k8s/overlays/eks/deploy-eks-application-stack.sh
+bash infra/k8s/environments/eks/deploy-eks-application-stack.sh
 ```
 
 `publish-images.sh` assigns the current full Git commit SHA as its image tag. An explicit `IMAGE_TAG` must also be a full lowercase commit SHA. Existing images are reused, and ECR prevents a commit tag from being overwritten.
@@ -164,14 +164,14 @@ AWS charges continue until the EKS cluster, node group, NAT gateway, and load ba
 Before `terraform destroy`, remove Kubernetes resources first so Kubernetes can clean up the ingress load balancer:
 
 ```bash
-kubectl delete -k infra/k8s/overlays/eks --ignore-not-found
+helm uninstall dist-jobs --namespace dist-jobs --ignore-not-found
 kubectl delete -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml --ignore-not-found
 ```
 
 Wait until the ingress load balancer is gone, then destroy the AWS infrastructure:
 
 ```bash
-bash infra/k8s/overlays/eks/destroy-eks-application-stack.sh --confirm
+bash infra/k8s/environments/eks/destroy-eks-application-stack.sh --confirm
 ```
 
 The helper deletes Kubernetes and ingress resources, waits for namespace cleanup, and runs Terraform destroy. ECR repositories use `force_delete = true`, so pushed images do not block teardown.

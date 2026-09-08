@@ -1,5 +1,5 @@
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
 metadata:
   name: api
   namespace: {{ .Release.Namespace }}
@@ -8,12 +8,28 @@ metadata:
 spec:
   replicas: {{ .Values.api.replicaCount }}
   minReadySeconds: 10
-  progressDeadlineSeconds: 300
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+    canary:
+      stableService: api
+      canaryService: api-canary
+      trafficRouting:
+        nginx:
+          stableIngress: api
+      steps:
+        - setWeight: 20
+        - analysis:
+            templates:
+              - templateName: api-canary-success
+            args:
+              - name: service-name
+                value: api-canary
+        - setWeight: 50
+        - analysis:
+            templates:
+              - templateName: api-canary-success
+            args:
+              - name: service-name
+                value: api-canary
   selector:
     matchLabels:
       app: api
