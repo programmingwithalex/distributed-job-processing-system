@@ -1,5 +1,9 @@
 releaseTag: latest
 
+applicationSecret:
+  create: false
+  stringData: {}
+
 config:
   appEnv: local
   logLevel: INFO

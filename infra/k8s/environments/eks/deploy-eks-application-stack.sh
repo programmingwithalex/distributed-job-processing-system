@@ -55,6 +55,9 @@ MONITORING_CHART_VERSION="87.21.0"
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-argocd}"
 ARGOCD_RELEASE="${ARGOCD_RELEASE:-argocd}"
 ARGOCD_CHART_VERSION="10.3.3"
+ARGO_ROLLOUTS_NAMESPACE="${ARGO_ROLLOUTS_NAMESPACE:-argo-rollouts}"
+ARGO_ROLLOUTS_RELEASE="${ARGO_ROLLOUTS_RELEASE:-argo-rollouts}"
+ARGO_ROLLOUTS_CHART_VERSION="2.40.5"
 APPLICATION_RELEASE="${APPLICATION_RELEASE:-dist-jobs}"
 APPLICATION_CHART="$repo_root/infra/k8s/charts/distributed-jobs"
 APPLICATION_VALUES="$APPLICATION_CHART/values-eks.yaml"
@@ -186,7 +189,7 @@ ensure_tracked_release_images() {
   fi
 
   if [[ "$IMAGE_TAG" == "$RELEASE_IMAGE_TAG" ]]; then
-    bash "$repo_root/infra/k8s/overlays/eks/publish-images.sh"
+    bash "$repo_root/infra/k8s/environments/eks/publish-images.sh"
     return
   fi
 
@@ -206,7 +209,7 @@ ensure_tracked_release_images() {
   echo "publishing missing images from tracked source commit ${RELEASE_IMAGE_TAG}"
   if ! COMPOSE_PROJECT_NAME=distributed-job-processing-system \
     IMAGE_TAG="$RELEASE_IMAGE_TAG" \
-    bash "$release_source_dir/infra/k8s/overlays/eks/publish-images.sh"; then
+    bash "$release_source_dir/infra/k8s/environments/eks/publish-images.sh"; then
     rm -rf "$release_source_dir"
     exit 1
   fi
@@ -251,24 +254,25 @@ run_database_migration() {
 }
 
 # confirm Kubernetes accepted the exact immutable image URI for each application workload
-verify_deployment_image() {
-  local deployment_name="$1"
-  local container_name="$2"
-  local expected_image="$3"
+verify_workload_image() {
+  local resource_type="$1"
+  local resource_name="$2"
+  local container_name="$3"
+  local expected_image="$4"
   local deployed_image
 
   deployed_image="$(
-    kubectl get deployment "$deployment_name" \
+    kubectl get "$resource_type" "$resource_name" \
       --namespace "$NAMESPACE" \
       --output "jsonpath={.spec.template.spec.containers[?(@.name=='${container_name}')].image}"
   )"
 
   if [[ "$deployed_image" != "$expected_image" ]]; then
-    echo "deployment ${deployment_name} uses ${deployed_image}; expected ${expected_image}" >&2
+    echo "${resource_type} ${resource_name} uses ${deployed_image}; expected ${expected_image}" >&2
     exit 1
   fi
 
-  echo "verified deployment ${deployment_name} image: ${deployed_image}"
+  echo "verified ${resource_type} ${resource_name} image: ${deployed_image}"
 }
 
 require_command aws
@@ -295,7 +299,16 @@ helm upgrade --install "$MONITORING_RELEASE" oci://ghcr.io/prometheus-community/
   --namespace "$MONITORING_NAMESPACE" \
   --create-namespace \
   --version "$MONITORING_CHART_VERSION" \
-  --values "$repo_root/infra/k8s/overlays/eks/monitoring/eks-monitoring-values.yaml" \
+  --values "$repo_root/infra/k8s/environments/eks/monitoring/eks-monitoring-values.yaml" \
+  --atomic \
+  --wait \
+  --timeout 10m
+
+echo "installing Argo Rollouts"
+helm upgrade --install "$ARGO_ROLLOUTS_RELEASE" oci://ghcr.io/argoproj/argo-helm/argo-rollouts \
+  --namespace "$ARGO_ROLLOUTS_NAMESPACE" \
+  --create-namespace \
+  --version "$ARGO_ROLLOUTS_CHART_VERSION" \
   --atomic \
   --wait \
   --timeout 10m
@@ -348,10 +361,11 @@ run_database_migration
 echo "applying rendered EKS Helm release"
 kubectl apply -f "$rendered_manifest"
 
-echo "waiting for application deployments"
-for deployment in postgres rabbitmq api celery-worker frontend; do
+echo "waiting for application workloads"
+for deployment in postgres rabbitmq celery-worker frontend; do
   kubectl rollout status "deployment/${deployment}" --namespace "$NAMESPACE" --timeout=300s
 done
+kubectl rollout status rollout/api --namespace "$NAMESPACE" --timeout=300s
 
 # register the desired state only after the direct rollout is healthy
 echo "registering EKS Argo CD application"
@@ -359,9 +373,9 @@ kubectl apply --filename "$repo_root/infra/k8s/argocd/eks-application.yaml"
 kubectl get application dist-jobs-eks --namespace "$ARGOCD_NAMESPACE"
 
 echo "verifying immutable application images"
-verify_deployment_image "api" "api" "${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-api:${RELEASE_IMAGE_TAG}"
-verify_deployment_image "celery-worker" "celery-worker" "${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-celery-worker:${RELEASE_IMAGE_TAG}"
-verify_deployment_image "frontend" "frontend" "${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-frontend:${RELEASE_IMAGE_TAG}"
+verify_workload_image "rollout" "api" "api" "${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-api:${RELEASE_IMAGE_TAG}"
+verify_workload_image "deployment" "celery-worker" "celery-worker" "${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-celery-worker:${RELEASE_IMAGE_TAG}"
+verify_workload_image "deployment" "frontend" "frontend" "${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-frontend:${RELEASE_IMAGE_TAG}"
 
 echo "application stack deployed"
 echo "deployed immutable image tag: ${RELEASE_IMAGE_TAG}"

@@ -80,7 +80,7 @@ jobs:
         # build and push all application images as one immutable release bundle
         env:
           IMAGE_TAG: ${{ steps.release.outputs.sha }}
-        run: bash infra/k8s/overlays/eks/publish-images.sh
+        run: bash infra/k8s/environments/eks/publish-images.sh
 
       - name: Create promotion branch
         # switch from the selected source revision to main's GitOps desired state

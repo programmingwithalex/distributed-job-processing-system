@@ -66,10 +66,10 @@ kubectl config current-context
 
 ## Deploy The Complete Application Stack
 
-After Terraform has created the EKS cluster, this helper automates the remaining deployment steps: kubeconfig update, ingress-nginx installation, namespace and secret creation, ECR image publishing, Kustomize apply, and workload rollout checks.
+After Terraform has created the EKS cluster, this helper automates the remaining deployment steps: kubeconfig update, ingress-nginx installation, namespace and secret creation, ECR image publishing, Helm rendering, and workload rollout checks.
 
 ```bash
-bash infra/k8s/overlays/eks/deploy-eks-application-stack.sh
+bash infra/k8s/environments/eks/deploy-eks-application-stack.sh
 ```
 
 The helper runs the following steps in order:
@@ -79,7 +79,7 @@ The helper runs the following steps in order:
 3. Creates the `dist-jobs` namespace idempotently.
 4. Creates `application-secrets` if it does not already exist, including a generated Postgres password and the application database and broker connection values. On later runs, it preserves the existing Secret to avoid rotating database credentials.
 5. Runs [publish-images.sh](./publish-images.sh), which builds and pushes any images missing for the selected full commit SHA and reuses immutable images that already exist.
-6. Copies the Kubernetes manifests to a temporary workspace, injects the ECR registry and commit SHA, and applies the rendered EKS overlay without modifying tracked files.
+6. Renders the Git-tracked Helm chart with the EKS values file, which contains the immutable ECR image references and commit SHA.
 7. Waits for Postgres, RabbitMQ, API, Celery worker, and frontend deployment rollouts to complete.
 8. Verifies that the API, Celery worker, and frontend Deployments reference the exact expected immutable images.
 9. Displays the application pods, Services, Ingress resources, and the ingress controller load balancer hostname for follow-up testing.
@@ -99,7 +99,7 @@ Only select a commit that was successfully published under the immutable-image d
 For the Terraform-managed EKS environment, use the ordered destroy helper rather than `eksctl`:
 
 ```bash
-bash infra/k8s/overlays/eks/destroy-eks-application-stack.sh --confirm
+bash infra/k8s/environments/eks/destroy-eks-application-stack.sh --confirm
 ```
 
 The helper removes the application and ingress-nginx resources, waits for namespace cleanup, and then runs `terraform destroy`. The ECR repositories are configured for force deletion, so images do not block teardown. The persistent Terraform state bootstrap bucket is intentionally not destroyed.
@@ -136,12 +136,17 @@ kubectl create secret generic application-secrets \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-## Apply The EKS Overlay
+## Install The EKS Helm Release
 
-Apply the EKS overlay (which references `../../base` and layers EKS-specific customizations on top):
+Render and install the Git-tracked EKS release:
 
 ```bash
-kubectl apply -k infra/k8s/overlays/eks
+helm upgrade --install dist-jobs infra/k8s/charts/distributed-jobs \
+  --namespace dist-jobs \
+  --values infra/k8s/charts/distributed-jobs/values-eks.yaml \
+  --wait \
+  --wait-for-jobs \
+  --timeout 10m
 ```
 
 ## Verify Deployment
@@ -224,7 +229,7 @@ If you are done testing, delete the cluster promptly to avoid ongoing EKS, EC2, 
 Quick cleanup helper:
 
 ```bash
-bash infra/k8s/overlays/eks/teardown-cluster.sh "$CLUSTER_NAME" "$AWS_REGION"
+bash infra/k8s/environments/eks/teardown-cluster.sh "$CLUSTER_NAME" "$AWS_REGION"
 ```
 
 ## Delete The Cluster

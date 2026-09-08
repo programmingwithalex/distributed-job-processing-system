@@ -104,13 +104,14 @@ The dashboard includes:
 - a job submission form for `input_value`, `job_type`, and optional retry budget
 - a selected-job panel that auto-refreshes until the job reaches `completed` or `failed`
 - a recent-jobs list with status filtering and row selection
+- an API canary rollout that uses Prometheus HTTP 5xx metrics to promote or roll back EKS releases
 
 ## Run on local Kubernetes with k3d
 
 Deploy the local application and monitoring stacks from a Windows Terminal Ubuntu tab with:
 
 ```bash
-bash infra/k8s/overlays/local/deploy-local-stack.sh
+bash infra/k8s/environments/local/deploy-local-stack.sh
 ```
 
 The helper requires Docker, k3d, kubectl, and Helm. For the manual deployment flow and local Grafana access, see [infra/k8s/README.md](infra/k8s/README.md).
@@ -140,12 +141,18 @@ helm upgrade --install monitoring oci://ghcr.io/prometheus-community/charts/kube
   --namespace monitoring \
   --create-namespace \
   --version 87.21.0 \
-  --values infra/k8s/overlays/local/local-monitoring-values.yaml \
+  --values infra/k8s/environments/local/local-monitoring-values.yaml \
   --atomic \
   --wait \
   --timeout 10m
 
-kubectl apply -k infra/k8s/overlays/local
+helm upgrade --install dist-jobs infra/k8s/charts/distributed-jobs \
+  --namespace dist-jobs \
+  --create-namespace \
+  --values infra/k8s/charts/distributed-jobs/values-local.yaml \
+  --wait \
+  --wait-for-jobs \
+  --timeout 10m
 
 kubectl get pods -n dist-jobs
 kubectl get pods -n monitoring
@@ -202,23 +209,29 @@ kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main
 kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=180s
 ```
 
-Install the local monitoring stack before applying the local overlay, because the overlay includes Prometheus Operator custom resources:
+Install the local monitoring stack before installing the application chart, because the chart includes Prometheus Operator custom resources:
 
 ```bash
 helm upgrade --install monitoring oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack \
   --namespace monitoring \
   --create-namespace \
   --version 87.21.0 \
-  --values infra/k8s/overlays/local/local-monitoring-values.yaml \
+  --values infra/k8s/environments/local/local-monitoring-values.yaml \
   --atomic \
   --wait \
   --timeout 10m
 ```
 
-Apply the local overlay, including its shared API monitoring resources:
+Install the local application chart, including its API monitoring resources:
 
 ```bash
-kubectl apply -k infra/k8s/overlays/local
+helm upgrade --install dist-jobs infra/k8s/charts/distributed-jobs \
+  --namespace dist-jobs \
+  --create-namespace \
+  --values infra/k8s/charts/distributed-jobs/values-local.yaml \
+  --wait \
+  --wait-for-jobs \
+  --timeout 10m
 ```
 
 Wait for the pods and inspect the ingress resources:
@@ -245,8 +258,8 @@ service.
 The frontend is exposed at <http://localhost:8080> and the API is exposed through the
 same ingress entrypoint at <http://localhost:8080/api/health>.
 
-The local Kubernetes base manifests live under `infra/k8s/base`, and the first local
-overlay lives under `infra/k8s/overlays/local`.
+The shared application chart lives under `infra/k8s/charts/distributed-jobs`, with
+`values-local.yaml` for k3d and `values-eks.yaml` for EKS.
 
 ## API usage
 

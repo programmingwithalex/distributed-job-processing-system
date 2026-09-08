@@ -1,23 +1,23 @@
 # Argo CD Configuration
 
-This directory contains resources that configure Argo CD itself. It is separate from `infra/k8s/overlays/local/`, which contains the application resources that Argo CD observes and eventually manages.
+This directory contains resources that configure Argo CD itself. It is separate from the Helm chart, which contains the application resources that Argo CD observes and eventually manages.
 
 ## Why this directory is separate
 
 `local-application.yaml` is an Argo CD `Application` resource. It tells Argo CD where desired state is stored and where that state should be deployed; it is not part of the distributed jobs workload.
 
-Keeping the resource outside the managed local overlay creates a clear ownership boundary:
+Keeping the resource outside the managed application chart creates a clear ownership boundary:
 
 ```text
 infra/k8s/argocd/          configures Argo CD
-infra/k8s/overlays/local/  contains resources managed by Argo CD
+infra/k8s/charts/          contains resources managed by Argo CD
 ```
 
 It also prevents the local Application from including and managing its own definition recursively.
 
 ## Install the control plane
 
-The Argo CD control plane is installed by `infra/k8s/overlays/local/deploy-local-stack.sh` with the pinned official Helm chart:
+The Argo CD control plane is installed by `infra/k8s/environments/local/deploy-local-stack.sh` with the pinned official Helm chart:
 
 ```bash
 helm upgrade --install "$ARGOCD_RELEASE" oci://ghcr.io/argoproj/argo-helm/argo-cd \
@@ -43,7 +43,8 @@ The Application tracks:
 
 - repository: `https://github.com/programmingwithalex/distributed-job-processing-system.git`
 - revision: `main`
-- source path: `infra/k8s/overlays/local`
+- source path: `infra/k8s/charts/distributed-jobs`
+- Helm values file: `values-local.yaml`
 - destination namespace: `dist-jobs`
 
 ## Automated synchronization

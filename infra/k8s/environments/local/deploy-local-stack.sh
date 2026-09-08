@@ -11,10 +11,16 @@ MONITORING_CHART_VERSION="87.21.0"
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-argocd}"
 ARGOCD_RELEASE="${ARGOCD_RELEASE:-argocd}"
 ARGOCD_CHART_VERSION="10.3.3"
+ARGO_ROLLOUTS_NAMESPACE="${ARGO_ROLLOUTS_NAMESPACE:-argo-rollouts}"
+ARGO_ROLLOUTS_RELEASE="${ARGO_ROLLOUTS_RELEASE:-argo-rollouts}"
+ARGO_ROLLOUTS_CHART_VERSION="2.40.5"
+APPLICATION_RELEASE="${APPLICATION_RELEASE:-dist-jobs}"
 INGRESS_NGINX_MANIFEST="https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml"
 
 # resolve every relative path from the repository root, regardless of the caller's directory
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+APPLICATION_CHART="$repo_root/infra/k8s/charts/distributed-jobs"
+APPLICATION_VALUES="$APPLICATION_CHART/values-local.yaml"
 
 # fail before changing the cluster when a required local tool is unavailable
 require_command() {
@@ -30,28 +36,6 @@ require_command docker
 require_command helm
 require_command k3d
 require_command kubectl
-
-# recreate the fixed-name job so its immutable pod template uses the current image
-run_database_migration() {
-  kubectl delete job database-migration \
-    --namespace "$NAMESPACE" \
-    --ignore-not-found \
-    --wait=true
-
-  kubectl apply \
-    --namespace "$NAMESPACE" \
-    --filename "$repo_root/infra/k8s/base/database-migration-job.yaml"
-
-  # print migration logs when the job fails or exceeds its five-minute budget
-  if ! kubectl wait \
-    --namespace "$NAMESPACE" \
-    --for=condition=complete \
-    job/database-migration \
-    --timeout=300s; then
-    kubectl logs job/database-migration --namespace "$NAMESPACE" || true
-    exit 1
-  fi
-}
 
 # start from a clean cluster so stale images and Kubernetes resources cannot affect the test
 echo "recreating k3d cluster ${CLUSTER_NAME}"
@@ -85,7 +69,16 @@ helm upgrade --install "$MONITORING_RELEASE" oci://ghcr.io/prometheus-community/
   --namespace "$MONITORING_NAMESPACE" \
   --create-namespace \
   --version "$MONITORING_CHART_VERSION" \
-  --values "$repo_root/infra/k8s/overlays/local/local-monitoring-values.yaml" \
+  --values "$repo_root/infra/k8s/environments/local/local-monitoring-values.yaml" \
+  --atomic \
+  --wait \
+  --timeout 10m
+
+echo "installing Argo Rollouts"
+helm upgrade --install "$ARGO_ROLLOUTS_RELEASE" oci://ghcr.io/argoproj/argo-helm/argo-rollouts \
+  --namespace "$ARGO_ROLLOUTS_NAMESPACE" \
+  --create-namespace \
+  --version "$ARGO_ROLLOUTS_CHART_VERSION" \
   --atomic \
   --wait \
   --timeout 10m
@@ -103,32 +96,25 @@ helm upgrade --install "$ARGOCD_RELEASE" oci://ghcr.io/argoproj/argo-helm/argo-c
   --wait \
   --timeout 10m
 
-# register desired state for comparison while leaving synchronization under manual control
+# register the Helm-rendered desired state with its automated synchronization policy
 echo "registering local Argo CD application"
 kubectl apply --filename "$repo_root/infra/k8s/argocd/local-application.yaml"
 
-# apply only the resources required by the migration, then wait for postgres
-echo "preparing database migration"
-kubectl apply --filename "$repo_root/infra/k8s/base/namespace.yaml"
-kubectl apply \
+echo "installing local application Helm release"
+helm upgrade --install "$APPLICATION_RELEASE" "$APPLICATION_CHART" \
   --namespace "$NAMESPACE" \
-  --filename "$repo_root/infra/k8s/overlays/local/secret.yaml" \
-  --filename "$repo_root/infra/k8s/base/postgres-deployment.yaml" \
-  --filename "$repo_root/infra/k8s/base/postgres-service.yaml"
-kubectl rollout status deployment/postgres --namespace "$NAMESPACE" --timeout=300s
-
-echo "running database migration"
-run_database_migration
-
-# create the application namespace, configuration, workloads, services, ingress, and monitors
-echo "applying local application overlay"
-kubectl apply -k "$repo_root/infra/k8s/overlays/local"
+  --create-namespace \
+  --values "$APPLICATION_VALUES" \
+  --wait \
+  --wait-for-jobs \
+  --timeout 10m
 
 # wait for every application workload before reporting the stack as usable
-echo "waiting for application deployments"
-for deployment in postgres rabbitmq api celery-worker frontend; do
+echo "waiting for application workloads"
+for deployment in postgres rabbitmq celery-worker frontend; do
   kubectl rollout status "deployment/${deployment}" --namespace "$NAMESPACE" --timeout=300s
 done
+kubectl rollout status rollout/api --namespace "$NAMESPACE" --timeout=300s
 
 echo "local application, monitoring, and Argo CD stacks deployed"
 kubectl get pods --namespace "$NAMESPACE"
