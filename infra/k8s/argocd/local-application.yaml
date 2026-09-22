@@ -1,4 +1,4 @@
-# let Argo CD compare the local application overlay with the running k3d cluster
+# let Argo CD compare the local Helm release with the running k3d cluster
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -11,7 +11,11 @@ spec:
     repoURL: https://github.com/programmingwithalex/distributed-job-processing-system.git
     # follow merged desired state instead of this feature branch
     targetRevision: main
-    path: infra/k8s/overlays/local
+    path: infra/k8s/charts/distributed-jobs
+    helm:
+      releaseName: dist-jobs
+      valueFiles:
+        - values-local.yaml
   destination:
     # address the cluster where Argo CD itself is running
     server: https://kubernetes.default.svc

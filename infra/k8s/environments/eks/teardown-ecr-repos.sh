@@ -4,7 +4,7 @@
 # ** usage ** #
 
 # AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-# bash infra/k8s/overlays/eks/teardown-ecr-repos.sh "$AWS_ACCOUNT_ID" us-east-1
+# bash infra/k8s/environments/eks/teardown-ecr-repos.sh "$AWS_ACCOUNT_ID" us-east-1
 
 # **************************************************** #
 

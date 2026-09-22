@@ -102,7 +102,7 @@ jobs:
         env:
           # identify the checked-out source so the script can preserve image provenance
           IMAGE_TAG: ${{ steps.revision.outputs.sha }}
-        run: bash infra/k8s/overlays/eks/deploy-eks-application-stack.sh
+        run: bash infra/k8s/environments/eks/deploy-eks-application-stack.sh
 
       - name: Verify application endpoint
         id: ingress

@@ -32,26 +32,21 @@ jobs:
           npx --yes prettier@3.5.3 --check \
             .github/workflows/promote-eks-release.yml \
             README.md \
+            infra/k8s/argocd/*.yaml \
             infra/k8s/charts/distributed-jobs/Chart.yaml \
             infra/k8s/charts/distributed-jobs/values.yaml \
+            infra/k8s/charts/distributed-jobs/values-local.yaml \
             infra/k8s/charts/distributed-jobs/values-eks.yaml \
             infra/k8s/README.md \
-            infra/k8s/overlays/README.md \
-            infra/k8s/overlays/eks/README.md \
-            infra/k8s/monitoring/*.yaml \
-            infra/k8s/overlays/local/kustomization.yaml \
-            infra/k8s/overlays/local/local-monitoring-values.yaml \
-            infra/k8s/overlays/eks/kustomization.yaml
+            infra/k8s/environments/README.md \
+            infra/k8s/environments/eks/README.md \
+            infra/k8s/environments/eks/DEPLOYMENT.md \
+            infra/k8s/environments/local/local-monitoring-values.yaml
 
       - name: Validate Terraform configuration
         run: |
           terraform -chdir=infra/terraform init -backend=false -input=false
           terraform -chdir=infra/terraform validate
-
-      - name: Validate Kubernetes manifests
-        run: |
-          kubectl kustomize infra/k8s/overlays/local > /dev/null
-          kubectl kustomize infra/k8s/overlays/eks > /dev/null
 
       - name: Validate application Helm chart
         run: |
@@ -63,6 +58,7 @@ jobs:
 
           # validate chart structure and values before inspecting rendered resources
           helm lint "$chart_dir" --values "$values_file"
+          helm lint "$chart_dir" --values "$chart_dir/values-local.yaml"
 
           # render the exact EKS release once for all semantic assertions below
           rendered_manifest="$(mktemp)"
@@ -70,6 +66,10 @@ jobs:
           helm template dist-jobs "$chart_dir" \
             --namespace dist-jobs \
             --values "$values_file" > "$rendered_manifest"
+
+          helm template dist-jobs "$chart_dir" \
+            --namespace dist-jobs \
+            --values "$chart_dir/values-local.yaml" > /dev/null
 
           # preserve release provenance and monitoring dashboard templating
           grep -Fq "distributed-jobs.dev/source-revision: \"$release_sha\"" "$rendered_manifest"
@@ -92,10 +92,10 @@ jobs:
       # -n checks for syntax errors without executing the scripts
       - name: Validate deployment scripts
         run: |
-          bash -n infra/k8s/overlays/local/deploy-local-stack.sh
-          bash -n infra/k8s/overlays/eks/deploy-eks-application-stack.sh
-          bash -n infra/k8s/overlays/eks/destroy-eks-application-stack.sh
-          bash -n infra/k8s/overlays/eks/publish-images.sh
+          bash -n infra/k8s/environments/local/deploy-local-stack.sh
+          bash -n infra/k8s/environments/eks/deploy-eks-application-stack.sh
+          bash -n infra/k8s/environments/eks/destroy-eks-application-stack.sh
+          bash -n infra/k8s/environments/eks/publish-images.sh
 
       # validates both monitoring configurations can produce valid Kubernetes manifests from exact Helm chart deployed
       # catches mistakes such as invalid YAML, invalid Helm value names or types, malformed templating inputs, and chart-version incompatibilities
@@ -106,11 +106,11 @@ jobs:
           helm template monitoring oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack \
             --namespace monitoring \
             --version 87.21.0 \
-            --values infra/k8s/overlays/local/local-monitoring-values.yaml > /dev/null
+            --values infra/k8s/environments/local/local-monitoring-values.yaml > /dev/null
           helm template monitoring oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack \
             --namespace monitoring \
             --version 87.21.0 \
-            --values infra/k8s/overlays/eks/monitoring/eks-monitoring-values.yaml > /dev/null
+            --values infra/k8s/environments/eks/monitoring/eks-monitoring-values.yaml > /dev/null
 
   # validate the FastAPI and worker code independently of browser tests
   backend:

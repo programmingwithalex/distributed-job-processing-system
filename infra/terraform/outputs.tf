@@ -32,5 +32,5 @@ output "aws_account_id" {
 
 output "publish_images_example" {
   description = "Example command to publish images after Terraform apply"
-  value       = "bash infra/k8s/overlays/eks/publish-images.sh"
+  value       = "bash infra/k8s/environments/eks/publish-images.sh"
 }

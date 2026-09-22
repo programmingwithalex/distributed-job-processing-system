@@ -1,5 +1,5 @@
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
 metadata:
   name: api
   namespace: {{ .Release.Namespace }}
@@ -8,12 +8,34 @@ metadata:
 spec:
   replicas: {{ .Values.api.replicaCount }}
   minReadySeconds: 10
-  progressDeadlineSeconds: 300
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+    canary:
+      # Argo Rollouts keeps these Services pointed at the stable and candidate ReplicaSets
+      stableService: api
+      canaryService: api-canary
+      trafficRouting:
+        nginx:
+          # The public Ingress is adjusted to split traffic between the two Services
+          stableIngress: api
+      steps:
+        # Start by sending 20% of requests to the candidate ReplicaSet
+        - setWeight: 20
+        # Continue only when Prometheus reports an acceptable canary error rate
+        - analysis:
+            templates:
+              - templateName: api-canary-success
+            args:
+              - name: service-name
+                value: api-canary
+        # Increase traffic only after the first analysis succeeds
+        - setWeight: 50
+        # A second analysis gate protects the larger canary audience
+        - analysis:
+            templates:
+              - templateName: api-canary-success
+            args:
+              - name: service-name
+                value: api-canary
   selector:
     matchLabels:
       app: api
@@ -40,6 +62,7 @@ spec:
               memory: 512Mi
           lifecycle:
             preStop:
+              # Allow NGINX and Service endpoint updates to drain in-flight requests
               exec:
                 command: ["sh", "-c", "sleep 5"]
           envFrom:

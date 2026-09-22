@@ -1,0 +1,26 @@
+# An Argo Rollouts CRD; its controller creates AnalysisRuns from this template
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: api-canary-success
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    distributed-jobs.dev/source-revision: {{ .Values.releaseTag | quote }}
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: http-5xx-rate
+      # Query twice, 30 seconds apart; the second failed measurement aborts the rollout
+      interval: 30s
+      count: 2
+      failureLimit: 1
+      successCondition: result[0] <= 0.05
+      provider:
+        # Prometheus supplies the metric, but Argo Rollouts evaluates the promotion gate
+        prometheus:
+          address: http://monitoring-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            (sum(rate(api_http_requests_total{service="{{ "{{args.service-name}}" }}",status_code=~"5.."}[1m])) or vector(0))
+              /
+            clamp_min((sum(rate(api_http_requests_total{service="{{ "{{args.service-name}}" }}"}[1m])) or vector(0)), 1)

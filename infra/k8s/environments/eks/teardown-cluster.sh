@@ -5,7 +5,7 @@
 
 # CLUSTER_NAME=dist-jobs
 # AWS_REGION=us-east-1
-# bash infra/k8s/overlays/eks/teardown-cluster.sh "$CLUSTER_NAME" "$AWS_REGION"
+# bash infra/k8s/environments/eks/teardown-cluster.sh "$CLUSTER_NAME" "$AWS_REGION"
 
 # **************************************************** #
 

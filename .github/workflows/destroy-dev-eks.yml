@@ -77,7 +77,7 @@ jobs:
             -backend-config="use_lockfile=true"
 
       - name: Destroy application and AWS infrastructure
-        run: bash infra/k8s/overlays/eks/destroy-eks-application-stack.sh --confirm
+        run: bash infra/k8s/environments/eks/destroy-eks-application-stack.sh --confirm
 
       - name: Verify resource removal
         run: |
