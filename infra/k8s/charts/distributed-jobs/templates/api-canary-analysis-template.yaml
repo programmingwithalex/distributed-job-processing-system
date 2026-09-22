@@ -1,3 +1,4 @@
+# An Argo Rollouts CRD; its controller creates AnalysisRuns from this template
 apiVersion: argoproj.io/v1alpha1
 kind: AnalysisTemplate
 metadata:
@@ -10,11 +11,13 @@ spec:
     - name: service-name
   metrics:
     - name: http-5xx-rate
+      # Query twice, 30 seconds apart; the second failed measurement aborts the rollout
       interval: 30s
       count: 2
       failureLimit: 1
       successCondition: result[0] <= 0.05
       provider:
+        # Prometheus supplies the metric, but Argo Rollouts evaluates the promotion gate
         prometheus:
           address: http://monitoring-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
           query: |
