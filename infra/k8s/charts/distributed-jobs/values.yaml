@@ -1,3 +1,5 @@
+# always loaded by default, values-local.yaml and values-eks.yaml enhance/override these default values
+# `helm upgrade --install <release-name> <chart-path> -f values-eks.yaml`
 releaseTag: latest
 
 applicationSecret:
@@ -39,6 +41,16 @@ celeryWorker:
   image:
     repository: distributed-job-processing-system-celery_worker
     pullPolicy: IfNotPresent
+
+keda:
+  celeryWorker:
+    enabled: true
+    pollingInterval: 30
+    cooldownPeriod: 300
+    minReplicaCount: 0
+    maxReplicaCount: 5
+    queueName: celery
+    queueLength: "5"
 
 frontend:
   replicaCount: 1

@@ -17,8 +17,8 @@
 #    its monitoring resources to become ready.
 # 7. Installs or upgrades the pinned Argo CD Helm release, including its CRDs,
 #    controllers, UI/API Service, repo server, Dex, dedicated Redis, RBAC, and config.
-# 8. Creates the application namespace and, only when absent, generates and stores
-#    PostgreSQL and Celery connection values in the application-secrets Secret.
+# 8. Creates the application namespace and generates its Secret when absent; for the
+#    default broker URL, updates RabbitMQ's hostname for KEDA cross-namespace access.
 # 9. Renders the application Helm chart with its EKS values and resolves the
 #    Git-tracked ECR registry and immutable release tag.
 # 10. Reuses promoted images already in ECR or rebuilds missing images from the exact
@@ -58,6 +58,9 @@ ARGOCD_CHART_VERSION="10.3.3"
 ARGO_ROLLOUTS_NAMESPACE="${ARGO_ROLLOUTS_NAMESPACE:-argo-rollouts}"
 ARGO_ROLLOUTS_RELEASE="${ARGO_ROLLOUTS_RELEASE:-argo-rollouts}"
 ARGO_ROLLOUTS_CHART_VERSION="2.40.5"
+KEDA_NAMESPACE="${KEDA_NAMESPACE:-keda}"
+KEDA_RELEASE="${KEDA_RELEASE:-keda}"
+KEDA_CHART_VERSION="2.17.2"
 APPLICATION_RELEASE="${APPLICATION_RELEASE:-dist-jobs}"
 APPLICATION_CHART="$repo_root/infra/k8s/charts/distributed-jobs"
 APPLICATION_VALUES="$APPLICATION_CHART/values-eks.yaml"
@@ -83,6 +86,19 @@ require_command() {
 
 create_application_secret() {
   if kubectl get secret application-secrets --namespace "$NAMESPACE" >/dev/null 2>&1; then
+    local broker_url
+    broker_url="$(kubectl get secret application-secrets \
+      --namespace "$NAMESPACE" \
+      --output jsonpath='{.data.CELERY_BROKER_URL}' | base64 --decode)"
+
+    if [[ "$broker_url" == "amqp://guest:guest@rabbitmq:5672//" ]]; then
+      # preserve user-managed credentials and update only the generated default URL
+      kubectl patch secret application-secrets \
+        --namespace "$NAMESPACE" \
+        --type merge \
+        --patch "{\"stringData\":{\"CELERY_BROKER_URL\":\"amqp://guest:guest@rabbitmq.${NAMESPACE}.svc.cluster.local:5672//\"}}"
+    fi
+
     echo "application secret already exists; preserving its current values"
     return
   fi
@@ -96,7 +112,7 @@ create_application_secret() {
     --from-literal=POSTGRES_USER=postgres \
     --from-literal="POSTGRES_PASSWORD=${postgres_password}" \
     --from-literal="DATABASE_URL=postgresql+psycopg://postgres:${postgres_password}@postgres:5432/jobs" \
-    --from-literal=CELERY_BROKER_URL='amqp://guest:guest@rabbitmq:5672//'
+    --from-literal="CELERY_BROKER_URL=amqp://guest:guest@rabbitmq.${NAMESPACE}.svc.cluster.local:5672//"
 }
 
 # render the exact release recorded in the Git-tracked EKS Helm values
@@ -313,6 +329,18 @@ helm upgrade --install "$ARGO_ROLLOUTS_RELEASE" oci://ghcr.io/argoproj/argo-helm
   --wait \
   --timeout 10m
 
+echo "installing KEDA"
+# this values file enables Prometheus scraping of KEDA itself; the application chart defines the Celery ScaledObject
+helm upgrade --install "$KEDA_RELEASE" keda \
+  --repo https://kedacore.github.io/charts \
+  --namespace "$KEDA_NAMESPACE" \
+  --create-namespace \
+  --version "$KEDA_CHART_VERSION" \
+  --values "$repo_root/infra/k8s/environments/keda-observability-values.yaml" \
+  --atomic \
+  --wait \
+  --timeout 10m
+
 # install the GitOps control plane without registering this project's Application yet
 # Helm chart 10.3.3 creates:
 # - CRDs: applications, applicationsets, and appprojects
@@ -365,7 +393,11 @@ echo "waiting for application workloads"
 for deployment in postgres rabbitmq celery-worker frontend; do
   kubectl rollout status "deployment/${deployment}" --namespace "$NAMESPACE" --timeout=300s
 done
-kubectl rollout status rollout/api --namespace "$NAMESPACE" --timeout=300s
+kubectl wait \
+  --for=jsonpath='{.status.phase}'=Healthy \
+  rollout/api \
+  --namespace "$NAMESPACE" \
+  --timeout=300s
 
 # register the desired state only after the direct rollout is healthy
 echo "registering EKS Argo CD application"

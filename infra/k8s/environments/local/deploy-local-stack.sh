@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+# recreate and deploy the complete local k3d application, GitOps, and monitoring stack
 set -euo pipefail
 
 # allow callers to override names while keeping predictable local defaults
@@ -14,6 +15,9 @@ ARGOCD_CHART_VERSION="10.3.3"
 ARGO_ROLLOUTS_NAMESPACE="${ARGO_ROLLOUTS_NAMESPACE:-argo-rollouts}"
 ARGO_ROLLOUTS_RELEASE="${ARGO_ROLLOUTS_RELEASE:-argo-rollouts}"
 ARGO_ROLLOUTS_CHART_VERSION="2.40.5"
+KEDA_NAMESPACE="${KEDA_NAMESPACE:-keda}"
+KEDA_RELEASE="${KEDA_RELEASE:-keda}"
+KEDA_CHART_VERSION="2.17.2"
 APPLICATION_RELEASE="${APPLICATION_RELEASE:-dist-jobs}"
 INGRESS_NGINX_MANIFEST="https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml"
 
@@ -83,6 +87,18 @@ helm upgrade --install "$ARGO_ROLLOUTS_RELEASE" oci://ghcr.io/argoproj/argo-helm
   --wait \
   --timeout 10m
 
+echo "installing KEDA"
+# this values file enables Prometheus scraping of KEDA itself; the application chart defines the Celery ScaledObject
+helm upgrade --install "$KEDA_RELEASE" keda \
+  --repo https://kedacore.github.io/charts \
+  --namespace "$KEDA_NAMESPACE" \
+  --create-namespace \
+  --version "$KEDA_CHART_VERSION" \
+  --values "$repo_root/infra/k8s/environments/keda-observability-values.yaml" \
+  --atomic \
+  --wait \
+  --timeout 10m
+
 # install the gitops control plane without assigning it application resources yet - 3 control plane components are installed:
 #  - api server exposes the ui, cli, authentication, and application status
 #  - repository server clones git repositories and renders kubernetes manifests
@@ -95,10 +111,6 @@ helm upgrade --install "$ARGOCD_RELEASE" oci://ghcr.io/argoproj/argo-helm/argo-c
   --atomic \
   --wait \
   --timeout 10m
-
-# register the Helm-rendered desired state with its automated synchronization policy
-echo "registering local Argo CD application"
-kubectl apply --filename "$repo_root/infra/k8s/argocd/local-application.yaml"
 
 echo "installing local application Helm release"
 helm upgrade --install "$APPLICATION_RELEASE" "$APPLICATION_CHART" \
@@ -114,7 +126,15 @@ echo "waiting for application workloads"
 for deployment in postgres rabbitmq celery-worker frontend; do
   kubectl rollout status "deployment/${deployment}" --namespace "$NAMESPACE" --timeout=300s
 done
-kubectl rollout status rollout/api --namespace "$NAMESPACE" --timeout=300s
+kubectl wait \
+  --for=jsonpath='{.status.phase}'=Healthy \
+  rollout/api \
+  --namespace "$NAMESPACE" \
+  --timeout=300s
+
+# register only after Helm creates the namespace and the initial release is healthy
+echo "registering local Argo CD application"
+kubectl apply --filename "$repo_root/infra/k8s/argocd/local-application.yaml"
 
 echo "local application, monitoring, and Argo CD stacks deployed"
 kubectl get pods --namespace "$NAMESPACE"
