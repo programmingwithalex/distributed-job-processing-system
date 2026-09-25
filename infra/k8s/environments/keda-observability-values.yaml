@@ -1,0 +1,17 @@
+# values for the separate KEDA Helm release installed by the local and EKS bootstrap scripts
+# this file configures KEDA's controller metrics, not the application's ScaledObject rule
+# the application chart defines that rule in celery-worker-scaled-object.yaml
+# the release label lets kube-prometheus-stack discover KEDA's generated ServiceMonitors
+prometheus:
+  operator:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: monitoring
+  metricServer:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: monitoring

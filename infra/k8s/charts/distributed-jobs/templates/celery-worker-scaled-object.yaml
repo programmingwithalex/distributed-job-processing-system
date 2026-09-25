@@ -1,0 +1,44 @@
+{{- if .Values.keda.celeryWorker.enabled }}
+# this template renders the KEDA TriggerAuthentication and ScaledObject for the Celery worker
+# render these KEDA resources only when worker autoscaling is enabled
+# KEDA owns the worker Deployment replica count through the HPA it creates
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: celery-worker-rabbitmq
+  namespace: {{ .Release.Namespace }}
+spec:
+  secretTargetRef:
+    # reuse the application's RabbitMQ connection URL instead of duplicating credentials
+    - parameter: host
+      name: application-secrets
+      key: CELERY_BROKER_URL
+---
+# KEDA watches the configured trigger and creates an HPA for this target Deployment
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: celery-worker
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    distributed-jobs.dev/source-revision: {{ .Values.releaseTag | quote }}
+spec:
+  scaleTargetRef:
+    # KEDA changes this Deployment's replica count as queue depth changes
+    name: celery-worker
+  # check the queue at a fixed interval and retain idle workers during cooldown
+  pollingInterval: {{ .Values.keda.celeryWorker.pollingInterval }}
+  cooldownPeriod: {{ .Values.keda.celeryWorker.cooldownPeriod }}
+  minReplicaCount: {{ .Values.keda.celeryWorker.minReplicaCount }}
+  maxReplicaCount: {{ .Values.keda.celeryWorker.maxReplicaCount }}
+  triggers:
+    # scale according to the number of messages waiting on Celery's default queue
+    - type: rabbitmq
+      metadata:
+        queueName: {{ .Values.keda.celeryWorker.queueName | quote }}
+        mode: QueueLength
+        # target this many queued jobs per worker when calculating the replica count
+        value: {{ .Values.keda.celeryWorker.queueLength | quote }}
+      authenticationRef:
+        name: celery-worker-rabbitmq
+{{- end }}
