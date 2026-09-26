@@ -20,7 +20,18 @@ spec:
     # address the cluster where Argo CD itself is running
     server: https://kubernetes.default.svc
     namespace: dist-jobs
+  # KEDA's HPA owns worker replicas; Argo previously reset them to the chart value and blocked scale-to-zero
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: celery-worker
+      namespace: dist-jobs
+      jsonPointers:
+        - /spec/replicas
   syncPolicy:
+    # apply the ignore rule during sync so Argo does not restore the chart replica count
+    syncOptions:
+      - RespectIgnoreDifferences=true
     automated:
       # apply desired state and correct live drift without requiring manual sync
       enabled: true

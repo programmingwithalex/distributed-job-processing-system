@@ -116,10 +116,18 @@ echo "installing local application Helm release"
 helm upgrade --install "$APPLICATION_RELEASE" "$APPLICATION_CHART" \
   --namespace "$NAMESPACE" \
   --create-namespace \
-  --values "$APPLICATION_VALUES" \
-  --wait \
-  --wait-for-jobs \
-  --timeout 10m
+  --values "$APPLICATION_VALUES"
+
+# let Argo Rollouts reconcile its canary Services before checking the custom resource's health
+echo "waiting for database migration"
+if ! kubectl wait \
+  --for=condition=complete \
+  job/database-migration \
+  --namespace "$NAMESPACE" \
+  --timeout=300s; then
+  kubectl logs job/database-migration --namespace "$NAMESPACE" || true
+  exit 1
+fi
 
 # wait for every application workload before reporting the stack as usable
 echo "waiting for application workloads"
