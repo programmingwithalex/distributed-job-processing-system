@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 
+# publish immutable ECR images from the selected source directory
+
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+IMAGE_SOURCE_DIR="${IMAGE_SOURCE_DIR:-$repo_root}"
 
 AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-$(aws sts get-caller-identity --query Account --output text)}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
@@ -81,7 +84,7 @@ else
   aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
   echo "building local images for cluster ${CLUSTER_NAME} with docker compose"
-  cd "$repo_root"
+  cd "$IMAGE_SOURCE_DIR"
   docker compose --project-name distributed-job-processing-system build api celery_worker frontend
 
   build_tag_push "distributed-job-processing-system-api:latest" "$api_repo"
