@@ -81,6 +81,49 @@ services:
         # worker needs the broker before it can consume tasks
         condition: service_healthy
 
+  outbox_publisher:
+    # publish committed lifecycle events independently from Celery job execution
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.worker
+    command: ["publish-job-events"]
+    environment:
+      APP_ENV: local
+      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/jobs
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JOB_EVENTS_TOPIC: job-events.v1
+    depends_on:
+      database_migration:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  history_consumer:
+    # project Kafka lifecycle events into queryable PostgreSQL job history
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.worker
+    command: ["consume-job-events"]
+    environment:
+      APP_ENV: local
+      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/jobs
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JOB_EVENTS_TOPIC: job-events.v1
+      JOB_HISTORY_CONSUMER_GROUP: job-history-v1
+    depends_on:
+      database_migration:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
   rabbitmq:
     # broker for celery task delivery
     image: rabbitmq:3.13-management
@@ -92,6 +135,35 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  kafka:
+    # single-node KRaft broker for local job lifecycle events
+    image: apache/kafka:4.1.1
+    environment:
+      CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_RETENTION_MS: "-1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+    ports:
+      - "29092:29092"
+    volumes:
+      - kafka_data:/tmp/kraft-combined-logs
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
 
   postgres:
     # system of record for job state and metadata
@@ -112,3 +184,4 @@ services:
 
 volumes:  # preserve across container restarts
   postgres_data:
+  kafka_data:

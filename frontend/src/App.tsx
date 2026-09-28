@@ -3,7 +3,9 @@ import type { ReactElement } from "react";
 
 import { JobRecordList } from "./components/JobRecordList";
 import { JobSubmissionForm } from "./components/JobSubmissionForm";
+import { OperationsMetricsPanel } from "./components/OperationsMetricsPanel";
 import { SelectedJobStatus } from "./components/SelectedJobStatus";
+import { useSelectedJobHistory } from "./hooks/useSelectedJobHistory";
 import { useSelectedJobRecord } from "./hooks/useSelectedJobRecord";
 import { replayJobRecord } from "./services/jobsApi";
 import type { JobStatusResponse } from "./types/jobs";
@@ -22,6 +24,11 @@ export function App(): ReactElement {
     selectedJobRecordErrorMessage,
     reloadSelectedJobRecord,
   } = useSelectedJobRecord(selectedJobIdentifier);
+  const {
+    jobHistoryEvents,
+    isLoadingJobHistory,
+    jobHistoryErrorMessage,
+  } = useSelectedJobHistory(selectedJobIdentifier);
 
   /** Promote a newly created job into the dashboard focus state. */
   function handleCreatedJobRecord(jobStatusResponse: JobStatusResponse): void {
@@ -91,6 +98,8 @@ export function App(): ReactElement {
         </div>
       </section>
 
+      <OperationsMetricsPanel />
+
       <section className="dashboard-grid">
         <JobSubmissionForm onJobCreated={handleCreatedJobRecord} />
         <SelectedJobStatus
@@ -98,6 +107,9 @@ export function App(): ReactElement {
           selectedJobRecord={selectedJobRecord}
           isLoadingSelectedJobRecord={isLoadingSelectedJobRecord}
           selectedJobRecordErrorMessage={selectedJobRecordErrorMessage}
+          jobHistoryEvents={jobHistoryEvents}
+          isLoadingJobHistory={isLoadingJobHistory}
+          jobHistoryErrorMessage={jobHistoryErrorMessage}
           isReplayingSelectedJob={isReplayingSelectedJob}
           replayErrorMessage={replayErrorMessage}
           replaySuccessMessage={replaySuccessMessage}

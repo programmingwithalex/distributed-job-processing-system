@@ -7,6 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.16.0,<2.0.0",
     "celery>=5.4.0,<6.0.0",
+    "confluent-kafka>=2.10.0,<3.0.0",
     "fastapi>=0.115.0,<1.0.0",
     "prometheus-client>=0.26.0,<1.0.0",
     "psycopg[binary]>=3.2.0,<4.0.0",
@@ -24,6 +25,9 @@ dev = [
 
 [project.scripts]
 seed-dummy-jobs = "app.common.seed_jobs:main"
+publish-job-events = "app.worker.outbox_publisher:main"
+consume-job-events = "app.worker.job_history_consumer:main"
+rebuild-job-history = "app.worker.job_history_consumer:rebuild_main"
 
 [build-system]
 requires = ["hatchling>=1.27.0"]

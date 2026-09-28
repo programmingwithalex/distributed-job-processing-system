@@ -9,6 +9,7 @@ from starlette.responses import Response
 
 from app.api.routes.health import router as health_router
 from app.api.routes.jobs import router as jobs_router
+from app.api.routes.operations import router as operations_router
 from app.common.logging import (
     configure_application_logging,
     correlation_identifier_context_scope,
@@ -106,6 +107,7 @@ def create_api_application() -> FastAPI:
     api_application.mount("/metrics", make_asgi_app())
     api_application.include_router(health_router)
     api_application.include_router(jobs_router)
+    api_application.include_router(operations_router)
     return api_application
 
 

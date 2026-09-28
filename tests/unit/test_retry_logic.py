@@ -3,9 +3,13 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 from app.common.models.job import JobRecord, JobStatus, JobType
+from app.common.models.job_event_outbox import JobEventOutboxRecord
+from app.common.schemas.job_events import JobLifecycleEventType
 from app.common.services.jobs import (
     build_post_failure_job_status,
     job_record_has_attempts_remaining,
+    mark_job_record_completed,
+    mark_job_record_processing,
     mark_job_record_queued_for_retry_or_dead_lettered,
 )
 from app.worker.tasks.jobs import (
@@ -31,12 +35,32 @@ def build_job_record_for_retry_testing(
         In-memory queued job record
     """
     return JobRecord(
+        id=uuid4(),
         input_value="retry-test",
         job_type=JobType.ECHO,
         status=JobStatus.QUEUED,
         attempt_count=attempt_count,
+        lifecycle_event_sequence=0,
         maximum_attempt_count=maximum_attempt_count,
     )
+
+
+def get_outbox_record(database_session: MagicMock) -> JobEventOutboxRecord:
+    """Return the single outbox row added by a service transition.
+
+    Args:
+        database_session: Mock session used by the transition test
+
+    Returns:
+        Outbox row added to the session
+    """
+    outbox_records = [
+        added_object
+        for add_call in database_session.add.call_args_list
+        if isinstance((added_object := add_call.args[0]), JobEventOutboxRecord)
+    ]
+    assert len(outbox_records) == 1
+    return outbox_records[0]
 
 
 def test_process_submitted_job_is_bound_to_celery_task_instance() -> None:
@@ -145,6 +169,9 @@ def test_retryable_failure_does_not_set_dead_lettered_timestamp() -> None:
     assert updated_job_record is not None
     assert updated_job_record.status == JobStatus.QUEUED
     assert updated_job_record.dead_lettered_at is None
+    outbox_record = get_outbox_record(database_session=database_session)
+    assert outbox_record.event_type == JobLifecycleEventType.RETRY_SCHEDULED.value
+    assert outbox_record.payload["error_message"] == "transient failure"
 
 
 def test_exhausted_failure_sets_dead_lettered_timestamp() -> None:
@@ -163,6 +190,47 @@ def test_exhausted_failure_sets_dead_lettered_timestamp() -> None:
     assert updated_job_record.status == JobStatus.DEAD_LETTERED
     assert updated_job_record.dead_lettered_at is not None
     assert updated_job_record.dead_lettered_at.tzinfo is not None
+    outbox_record = get_outbox_record(database_session=database_session)
+    assert outbox_record.event_type == JobLifecycleEventType.DEAD_LETTERED.value
+    assert outbox_record.payload["status"] == JobStatus.DEAD_LETTERED.value
+
+
+def test_mark_job_record_processing_adds_event_with_incremented_attempt_count() -> None:
+    """Verify the processing event captures the attempt persisted by the transition."""
+    job_record = build_job_record_for_retry_testing(attempt_count=0, maximum_attempt_count=3)
+    database_session = MagicMock()
+
+    with patch("app.common.services.jobs.get_job_record_by_id", return_value=job_record):
+        updated_job_record = mark_job_record_processing(
+            database_session=database_session,
+            job_id=uuid4(),
+        )
+
+    assert updated_job_record is job_record
+    outbox_record = get_outbox_record(database_session=database_session)
+    assert outbox_record.event_type == JobLifecycleEventType.PROCESSING.value
+    assert outbox_record.payload["attempt_count"] == 1
+    assert outbox_record.sequence_number == 1
+    database_session.commit.assert_called_once_with()
+
+
+def test_mark_job_record_completed_adds_event_with_resulting_status() -> None:
+    """Verify completion is added to the outbox before the state commit."""
+    job_record = build_job_record_for_retry_testing(attempt_count=1, maximum_attempt_count=3)
+    database_session = MagicMock()
+
+    with patch("app.common.services.jobs.get_job_record_by_id", return_value=job_record):
+        updated_job_record = mark_job_record_completed(
+            database_session=database_session,
+            job_id=uuid4(),
+            processed_result="processed:demo",
+        )
+
+    assert updated_job_record is job_record
+    outbox_record = get_outbox_record(database_session=database_session)
+    assert outbox_record.event_type == JobLifecycleEventType.COMPLETED.value
+    assert outbox_record.payload["status"] == JobStatus.COMPLETED.value
+    database_session.commit.assert_called_once_with()
 
 
 def test_build_processed_result_raises_for_transient_failure_on_first_attempt() -> None:
