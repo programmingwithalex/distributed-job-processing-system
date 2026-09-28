@@ -53,6 +53,12 @@ class JobRecord(ORMBase):
         default=JobStatus.QUEUED,
     )
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lifecycle_event_sequence: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
     maximum_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

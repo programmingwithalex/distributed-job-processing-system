@@ -7,7 +7,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.common.config import get_application_settings
 from app.common.database import ORMBase
-from app.common.models import job  # noqa: F401
+from app.common.models import job, job_event_outbox, job_event_partition_offset, job_history  # noqa: F401
 
 config = context.config
 

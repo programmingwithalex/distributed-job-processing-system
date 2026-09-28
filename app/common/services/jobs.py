@@ -1,11 +1,13 @@
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from app.common.config import get_application_settings
 from app.common.models.job import JobRecord, JobStatus, JobType
+from app.common.schemas.job_events import JobLifecycleEventType
+from app.common.services.job_events import add_job_lifecycle_event_to_outbox
 
 application_settings = get_application_settings()
 
@@ -46,15 +48,53 @@ def create_job_record(
     Returns:
         Persisted queued job record
     """
+    return _persist_new_job_record(
+        database_session=database_session,
+        input_value=input_value,
+        job_type=job_type,
+        maximum_attempt_count=maximum_attempt_count,
+        replayed_from_job_id=replayed_from_job_id,
+        event_type=JobLifecycleEventType.SUBMITTED,
+    )
+
+
+def _persist_new_job_record(
+    database_session: Session,
+    input_value: str,
+    job_type: JobType,
+    maximum_attempt_count: int | None,
+    replayed_from_job_id: UUID | None,
+    event_type: JobLifecycleEventType,
+) -> JobRecord:
+    """Persist a new job and its initial lifecycle event in one transaction.
+
+    Args:
+        database_session: Session used for the atomic database write
+        input_value: Input value submitted for processing
+        job_type: Processing behavior requested for the job
+        maximum_attempt_count: Optional per-job retry limit override
+        replayed_from_job_id: Optional identifier of the source job
+        event_type: Initial lifecycle event to record
+
+    Returns:
+        Persisted queued job record
+    """
     job_record = JobRecord(
+        id=uuid4(),
         input_value=input_value,
         job_type=job_type,
         status=JobStatus.QUEUED,
         attempt_count=0,
+        lifecycle_event_sequence=0,
         maximum_attempt_count=resolve_job_maximum_attempt_count(maximum_attempt_count=maximum_attempt_count),
         replayed_from_job_id=replayed_from_job_id,
     )
     database_session.add(job_record)
+    add_job_lifecycle_event_to_outbox(
+        database_session=database_session,
+        job_record=job_record,
+        event_type=event_type,
+    )
     database_session.commit()
     database_session.refresh(job_record)
     return job_record
@@ -84,27 +124,36 @@ def create_replayed_job_record(
         raise ValueError("Only dead-lettered jobs can be replayed")
 
     # create a new job so the original failure remains an immutable audit record
-    return create_job_record(
+    return _persist_new_job_record(
         database_session=database_session,
         input_value=dead_lettered_job_record.input_value,
         job_type=dead_lettered_job_record.job_type,
         maximum_attempt_count=dead_lettered_job_record.maximum_attempt_count,
         replayed_from_job_id=dead_lettered_job_record.id,
+        event_type=JobLifecycleEventType.REPLAYED,
     )
 
 
-def get_job_record_by_id(database_session: Session, job_id: UUID) -> JobRecord | None:
+def get_job_record_by_id(
+    database_session: Session,
+    job_id: UUID,
+    *,
+    lock_for_update: bool = False,
+) -> JobRecord | None:
     """
     Fetch a job record by its identifier from Postgres.
 
     Args:
         database_session: SQLAlchemy session used for persistence work
         job_id: Identifier of the job to retrieve
+        lock_for_update: Whether to lock the row until the transaction completes
 
     Returns:
         Matching job record, or None when the job does not exist
     """
     job_lookup_statement = select(JobRecord).where(JobRecord.id == job_id)
+    if lock_for_update:
+        job_lookup_statement = job_lookup_statement.with_for_update()
     return database_session.execute(job_lookup_statement).scalar_one_or_none()
 
 
@@ -172,13 +221,22 @@ def mark_job_record_processing(database_session: Session, job_id: UUID) -> JobRe
     Returns:
         Updated job record, or None when the job does not exist
     """
-    job_record = get_job_record_by_id(database_session=database_session, job_id=job_id)
+    job_record = get_job_record_by_id(
+        database_session=database_session,
+        job_id=job_id,
+        lock_for_update=True,
+    )
     if job_record is None:
         return None
 
     job_record.status = JobStatus.PROCESSING
     job_record.attempt_count += 1
     job_record.error_message = None
+    add_job_lifecycle_event_to_outbox(
+        database_session=database_session,
+        job_record=job_record,
+        event_type=JobLifecycleEventType.PROCESSING,
+    )
     database_session.commit()
     database_session.refresh(job_record)
     return job_record
@@ -229,13 +287,22 @@ def mark_job_record_completed(
     Returns:
         Updated job record, or None when the job does not exist
     """
-    job_record = get_job_record_by_id(database_session=database_session, job_id=job_id)
+    job_record = get_job_record_by_id(
+        database_session=database_session,
+        job_id=job_id,
+        lock_for_update=True,
+    )
     if job_record is None:
         return None
 
     job_record.status = JobStatus.COMPLETED
     job_record.result = processed_result
     job_record.error_message = None
+    add_job_lifecycle_event_to_outbox(
+        database_session=database_session,
+        job_record=job_record,
+        event_type=JobLifecycleEventType.COMPLETED,
+    )
     database_session.commit()
     database_session.refresh(job_record)
     return job_record
@@ -257,7 +324,11 @@ def mark_job_record_failed(
     Returns:
         Updated job record, or None when the job does not exist
     """
-    job_record = get_job_record_by_id(database_session=database_session, job_id=job_id)
+    job_record = get_job_record_by_id(
+        database_session=database_session,
+        job_id=job_id,
+        lock_for_update=True,
+    )
     if job_record is None:
         return None
 
@@ -293,6 +364,16 @@ def mark_job_record_queued_for_retry_or_dead_lettered(
     job_record.error_message = failure_message
     job_record.dead_lettered_at = (
         datetime.now(UTC) if job_record.status == JobStatus.DEAD_LETTERED else None
+    )
+    lifecycle_event_type = (
+        JobLifecycleEventType.RETRY_SCHEDULED
+        if job_record.status == JobStatus.QUEUED
+        else JobLifecycleEventType.DEAD_LETTERED
+    )
+    add_job_lifecycle_event_to_outbox(
+        database_session=database_session,
+        job_record=job_record,
+        event_type=lifecycle_event_type,
     )
     database_session.commit()
     database_session.refresh(job_record)

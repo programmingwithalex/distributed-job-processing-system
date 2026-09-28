@@ -7,12 +7,14 @@ from sqlalchemy.orm import Session
 from app.common.database import get_database_session
 from app.common.models.job import JobStatus
 from app.common.schemas.job import JobCreateRequest, JobStatusResponse
+from app.common.schemas.job_events import JobLifecycleEvent
 from app.common.services.jobs import (
     create_job_record,
     create_replayed_job_record,
     get_job_record_by_id,
     list_job_records,
 )
+from app.common.services.job_history import list_job_history_events
 from app.worker.tasks.jobs import process_submitted_job
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -120,6 +122,37 @@ def get_job_status_by_id(
 
     logger.info("Fetched job %s with status %s", job_record.id, job_record.status.value)
     return JobStatusResponse.model_validate(job_record)
+
+
+@router.get("/{job_id}/history", response_model=list[JobLifecycleEvent])
+def get_job_history(
+    job_id: UUID,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    database_session: Session = Depends(get_database_session),
+) -> list[JobLifecycleEvent]:
+    """Return the Kafka-projected lifecycle history for a persisted job.
+
+    Args:
+        job_id: Identifier of the job whose history is requested
+        limit: Maximum number of history events to return
+        offset: Number of events to skip
+        database_session: Request-scoped SQLAlchemy session
+
+    Returns:
+        Ordered lifecycle events from the history projection
+    """
+    job_record = get_job_record_by_id(database_session=database_session, job_id=job_id)
+    if job_record is None:
+        logger.warning("Job %s was not found during history lookup", job_id)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    return list_job_history_events(
+        database_session=database_session,
+        job_id=job_id,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("", response_model=list[JobStatusResponse])

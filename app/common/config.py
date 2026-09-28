@@ -12,6 +12,13 @@ class ApplicationSettings(BaseSettings):
     api_port: int = 8000
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/jobs"
     celery_broker_url: str = "amqp://guest:guest@localhost:5672//"
+    kafka_bootstrap_servers: str = "localhost:29092"
+    job_events_topic: str = "job-events.v1"
+    job_events_partition_count: int = 3
+    job_history_consumer_group: str = "job-history-v1"
+    job_event_publisher_poll_interval_seconds: float = 1.0
+    job_event_publisher_batch_size: int = 100
+    job_event_delivery_timeout_seconds: float = 10.0
     default_maximum_attempt_count: int = 3
 
     model_config = SettingsConfigDict(

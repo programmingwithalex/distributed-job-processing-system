@@ -1,5 +1,7 @@
 import type {
   JobCreateRequestPayload,
+  JobLifecycleEventResponse,
+  OperationsMetricsResponse,
   JobStatusResponse,
   ListJobRecordsOptions,
 } from "../types/jobs";
@@ -58,6 +60,28 @@ export async function fetchJobRecord(
   abortSignal?: AbortSignal,
 ): Promise<JobStatusResponse> {
   return fetchJson<JobStatusResponse>(buildApiUrl(`/jobs/${jobIdentifier}`), {
+    signal: abortSignal,
+  });
+}
+
+
+/** Retrieve the ordered Kafka-projected lifecycle history for one job. */
+export async function fetchJobHistoryEvents(
+  jobIdentifier: string,
+  abortSignal?: AbortSignal,
+): Promise<JobLifecycleEventResponse[]> {
+  return fetchJson<JobLifecycleEventResponse[]>(
+    buildApiUrl(`/jobs/${jobIdentifier}/history`),
+    { signal: abortSignal },
+  );
+}
+
+
+/** Retrieve rolling job-pipeline operations metrics. */
+export async function fetchOperationsMetrics(
+  abortSignal?: AbortSignal,
+): Promise<OperationsMetricsResponse> {
+  return fetchJson<OperationsMetricsResponse>(buildApiUrl("/operations/metrics"), {
     signal: abortSignal,
   });
 }

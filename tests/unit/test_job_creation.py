@@ -1,7 +1,9 @@
 from uuid import uuid4
 
 from app.common.models.job import JobRecord, JobStatus, JobType
+from app.common.models.job_event_outbox import JobEventOutboxRecord
 from app.common.schemas.job import JobCreateRequest
+from app.common.schemas.job_events import JobLifecycleEventType
 from app.common.services.jobs import (
     create_job_record,
     create_replayed_job_record,
@@ -71,6 +73,18 @@ def test_create_job_record_persists_custom_retry_budget() -> None:
     assert job_record.job_type == JobType.UPPERCASE
     assert job_record.maximum_attempt_count == 5
     assert job_record.attempt_count == 0
+    outbox_records = [
+        added_object
+        for added_object in fake_database_session.added_objects
+        if isinstance(added_object, JobEventOutboxRecord)
+    ]
+    assert len(outbox_records) == 1
+    assert outbox_records[0].job_id == job_record.id
+    assert outbox_records[0].message_key == str(job_record.id)
+    assert outbox_records[0].event_type == JobLifecycleEventType.SUBMITTED.value
+    assert outbox_records[0].payload["schema_version"] == 1
+    assert outbox_records[0].payload["event_type"] == JobLifecycleEventType.SUBMITTED.value
+    assert outbox_records[0].sequence_number == 1
     assert fake_database_session.commit_call_count == 1
     assert fake_database_session.refresh_call_count == 1
 
@@ -97,6 +111,14 @@ def test_create_replayed_job_record_copies_source_job_and_records_lineage() -> N
     assert replayed_job_record.attempt_count == 0
     assert replayed_job_record.maximum_attempt_count == 5
     assert replayed_job_record.replayed_from_job_id == dead_lettered_job_record.id
+    outbox_records = [
+        added_object
+        for added_object in fake_database_session.added_objects
+        if isinstance(added_object, JobEventOutboxRecord)
+    ]
+    assert len(outbox_records) == 1
+    assert outbox_records[0].event_type == JobLifecycleEventType.REPLAYED.value
+    assert outbox_records[0].payload["replayed_from_job_id"] == str(dead_lettered_job_record.id)
 
 
 def test_create_replayed_job_record_rejects_non_dead_lettered_source() -> None:

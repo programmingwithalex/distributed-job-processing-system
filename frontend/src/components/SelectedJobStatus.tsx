@@ -1,6 +1,8 @@
 import type { ReactElement } from "react";
 
+import { JobHistoryTimeline } from "./JobHistoryTimeline";
 import type { JobStatusResponse } from "../types/jobs";
+import type { JobLifecycleEventResponse } from "../types/jobs";
 
 
 export interface SelectedJobStatusProperties {
@@ -8,6 +10,9 @@ export interface SelectedJobStatusProperties {
   selectedJobRecord: JobStatusResponse | null;
   isLoadingSelectedJobRecord: boolean;
   selectedJobRecordErrorMessage: string | null;
+  jobHistoryEvents: JobLifecycleEventResponse[];
+  isLoadingJobHistory: boolean;
+  jobHistoryErrorMessage: string | null;
   isReplayingSelectedJob: boolean;
   replayErrorMessage: string | null;
   replaySuccessMessage: string | null;
@@ -31,6 +36,9 @@ export function SelectedJobStatus({
   selectedJobRecord,
   isLoadingSelectedJobRecord,
   selectedJobRecordErrorMessage,
+  jobHistoryEvents,
+  isLoadingJobHistory,
+  jobHistoryErrorMessage,
   isReplayingSelectedJob,
   replayErrorMessage,
   replaySuccessMessage,
@@ -149,6 +157,14 @@ export function SelectedJobStatus({
                 <pre data-testid="selected-job-replayed-from">{selectedJobRecord.replayed_from_job_id}</pre>
               </div>
             ) : null}
+          </div>
+
+          <div className="detail-grid job-history-grid">
+            <JobHistoryTimeline
+              jobHistoryEvents={jobHistoryEvents}
+              isLoadingJobHistory={isLoadingJobHistory}
+              jobHistoryErrorMessage={jobHistoryErrorMessage}
+            />
           </div>
         </>
       ) : null}

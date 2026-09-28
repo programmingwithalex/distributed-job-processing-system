@@ -1,6 +1,6 @@
 # distributed-job-processing-system
 
-Phase 1 is a minimal local job processing system built with FastAPI, Celery, RabbitMQ, and Postgres.
+A local job-processing system built with FastAPI, Celery, RabbitMQ, PostgreSQL, and Kafka lifecycle events.
 
 ## Phase 1 layout
 
@@ -30,6 +30,22 @@ docker compose up --build
 ```
 
 The frontend will be available at <http://localhost:5173> and the API will be available at <http://localhost:8000>.
+
+Compose starts a single-node Kafka KRaft broker, an outbox publisher, and a history consumer. The application publishes typed lifecycle events to `job-events.v1`, keyed by job ID; host-side Kafka clients can connect to <localhost:29092>.
+
+PostgreSQL commits each job transition and its outbox event together. The publisher retries unacknowledged events with capped exponential backoff, and the history consumer deduplicates by event ID before committing its Kafka offset. This makes lifecycle-event publication reliable; Celery dispatch still happens separately after the job transaction and is not covered by the outbox.
+
+The dashboard's operations strip reports completed jobs per minute and retry/dead-letter rates over a rolling five-minute window, plus the pending outbox count and the offset lag between Kafka publication and PostgreSQL history projection.
+
+To rebuild the history projection from retained Kafka events without rerunning any jobs, stop the regular consumer and run:
+
+```bash
+docker compose stop history_consumer
+docker compose run --rm history_consumer rebuild-job-history
+docker compose up -d history_consumer
+```
+
+The local broker retains Kafka records indefinitely to support this replay. Its `kafka_data` volume will grow until explicitly removed.
 
 ## Run locally with uv
 

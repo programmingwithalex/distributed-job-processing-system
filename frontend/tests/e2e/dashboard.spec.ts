@@ -13,6 +13,34 @@ interface CreatedJobRecord {
   replayed_from_job_id: string | null;
 }
 
+interface JobHistoryEvent {
+  event_type: string;
+  sequence_number: number;
+}
+
+
+
+/** Wait until Kafka has projected the expected number of lifecycle events. */
+async function waitForJobHistory(
+  request: APIRequestContext,
+  jobIdentifier: string,
+  expectedEventCount: number,
+): Promise<JobHistoryEvent[]> {
+  for (let attemptNumber = 0; attemptNumber < 30; attemptNumber += 1) {
+    const historyResponse = await request.get(`${apiBaseUrl}/jobs/${jobIdentifier}/history`);
+    expect(historyResponse.ok()).toBeTruthy();
+    const jobHistoryEvents = (await historyResponse.json()) as JobHistoryEvent[];
+
+    if (jobHistoryEvents.length >= expectedEventCount) {
+      return jobHistoryEvents;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error(`Job ${jobIdentifier} never projected ${expectedEventCount} lifecycle events`);
+}
+
 
 /** Return the recent-jobs refresh button with a resilient locator. */
 function getRefreshJobListButton(page: Page) {
@@ -95,6 +123,39 @@ async function expectJobRowToAppear(page: Page, createdJobRecord: CreatedJobReco
 
 
 test.describe("queue desk dashboard", () => {
+  test("shows pipeline metrics and Kafka-projected attempt history", async ({ page, request }) => {
+    const metricsResponse = await request.get(`${apiBaseUrl}/operations/metrics`);
+    expect(metricsResponse.ok()).toBeTruthy();
+    const operationsMetrics = await metricsResponse.json();
+    expect(operationsMetrics).toHaveProperty("throughput_jobs_per_minute");
+    expect(operationsMetrics).toHaveProperty("kafka_consumer_lag");
+
+    const uniqueSuffix = `${Date.now()}-history`;
+    const createdJobRecord = await createJobRecordForTest(
+      request,
+      `always-fail:e2e-${uniqueSuffix}`,
+      "echo",
+    );
+    await waitForJobStatus(request, createdJobRecord.id, "dead_lettered");
+    const jobHistoryEvents = await waitForJobHistory(request, createdJobRecord.id, 3);
+
+    expect(jobHistoryEvents.map((jobHistoryEvent) => jobHistoryEvent.event_type)).toEqual([
+      "submitted",
+      "processing",
+      "dead_lettered",
+    ]);
+    expect(jobHistoryEvents.map((jobHistoryEvent) => jobHistoryEvent.sequence_number)).toEqual([1, 2, 3]);
+
+    await page.goto("/");
+    await expect(page.getByTestId("operations-metrics-panel")).toBeVisible();
+    await expectJobRowToAppear(page, createdJobRecord);
+    await getJobRow(page, createdJobRecord).click();
+
+    const jobHistoryTimeline = page.getByTestId("job-history-timeline");
+    await expect(jobHistoryTimeline.getByTestId("job-history-event")).toHaveCount(3);
+    await expect(jobHistoryTimeline).toContainText("Dead-lettered");
+  });
+
   test("keeps the selected job panel locked to the clicked recent job", async ({ page, request }) => {
     const uniqueSuffix = `${Date.now()}-selection`;
     const firstCreatedJobRecord = await createJobRecordForTest(request, `always-fail:e2e-${uniqueSuffix}-a`, "echo");
