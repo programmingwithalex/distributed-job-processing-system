@@ -98,6 +98,19 @@ bash infra/k8s/environments/eks/deploy-eks-application-stack.sh
 
 Argo CD tracks the chart on `main`. An immutable-image promotion pull request changes `releaseTag` in `values-eks.yaml`; after review and merge, an operator manually synchronizes the EKS Application.
 
+### Development Kafka Storage
+
+The EKS values enable one Apache Kafka KRaft broker as a development-only storage exercise. It is a single combined broker/controller with plaintext listeners, no replica redundancy, seven-day log retention, and no publisher or history-consumer Deployments; the EKS application does not yet have end-to-end Kafka event processing. Do not treat it as a production Kafka service. Its EBS volume is AZ-bound, so loss of node capacity in that AZ can leave the broker Pending until capacity returns.
+
+Terraform installs the EBS CSI managed add-on with a narrowly scoped IRSA role. The Helm chart creates a `gp3` StorageClass and a 10 GiB `ReadWriteOnce` claim for the broker. Data survives broker Pod replacement, but deleting the StatefulSet deletes its claim and the StorageClass uses the `Delete` reclaim policy, so removing the development release also deletes its EBS volume. The EBS CSI add-on and volume incur AWS charges while provisioned.
+
+The broker is reachable from the `dist-jobs` namespace at `kafka.dist-jobs.svc.cluster.local:9092`. Check its StatefulSet and claim with:
+
+```bash
+kubectl get statefulset,pod,pvc,storageclass --namespace dist-jobs
+kubectl logs statefulset/kafka --namespace dist-jobs
+```
+
 ## Observability
 
 Grafana is available through a local port-forward:

@@ -4,6 +4,7 @@ module "eks" {
 
   cluster_name    = var.cluster_name
   cluster_version = var.kubernetes_version
+  enable_irsa     = true
 
   cluster_endpoint_public_access = var.cluster_endpoint_public_access
 

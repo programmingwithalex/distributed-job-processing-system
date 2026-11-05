@@ -1,0 +1,27 @@
+{{- if .Values.kafka.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: kafka
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/part-of: distributed-jobs
+    distributed-jobs.dev/environment: development
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    distributed-jobs.dev/lifecycle: development-only
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: kafka
+  ports:
+    - name: broker
+      port: 9092
+      targetPort: broker
+    - name: controller
+      port: 9093
+      targetPort: controller
+{{- end }}
