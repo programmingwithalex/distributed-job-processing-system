@@ -62,14 +62,15 @@ jobs:
 
           # render the exact EKS release once for all semantic assertions below
           rendered_manifest="$(mktemp)"
-          trap 'rm -f "$rendered_manifest"' EXIT
+          local_manifest="$(mktemp)"
+          trap 'rm -f "$rendered_manifest" "$local_manifest"' EXIT
           helm template dist-jobs "$chart_dir" \
             --namespace dist-jobs \
             --values "$values_file" > "$rendered_manifest"
 
           helm template dist-jobs "$chart_dir" \
             --namespace dist-jobs \
-            --values "$chart_dir/values-local.yaml" > /dev/null
+            --values "$chart_dir/values-local.yaml" > "$local_manifest"
 
           # preserve release provenance and monitoring dashboard templating
           grep -Fq "distributed-jobs.dev/source-revision: \"$release_sha\"" "$rendered_manifest"
@@ -80,6 +81,14 @@ jobs:
           grep -Fq 'argocd.argoproj.io/hook-delete-policy: BeforeHookCreation' "$rendered_manifest"
           test "$(grep -Fc 'argocd.argoproj.io/sync-wave: "-2"' "$rendered_manifest")" -eq 2
           grep -Fq 'argocd.argoproj.io/sync-wave: "-1"' "$rendered_manifest"
+
+          # keep the persistent single-broker Kafka topology explicitly EKS-development-only
+          grep -Fq 'kind: StatefulSet' "$rendered_manifest"
+          grep -Fq 'name: kafka-headless' "$rendered_manifest"
+          grep -Fq 'storageClassName: "dist-jobs-kafka-gp3"' "$rendered_manifest"
+          grep -Fq 'value: "604800000"' "$rendered_manifest"
+          ! grep -Fq 'name: kafka-headless' "$local_manifest"
+          ! grep -Fq 'kind: StatefulSet' "$local_manifest"
 
           # require one atomic immutable release across every application image
           for repository in \
@@ -134,7 +143,7 @@ jobs:
 
   # run the dashboard against the local Compose dependency stack
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4

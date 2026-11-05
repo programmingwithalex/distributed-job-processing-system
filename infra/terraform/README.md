@@ -5,8 +5,10 @@ This directory recreates the AWS infrastructure that was previously proven manua
 Terraform manages the AWS foundation only:
 
 - VPC and networking
-- EKS cluster and managed node group
+- EKS cluster, managed node group, and the EBS CSI managed add-on used by development Kafka storage
 - ECR repositories for the API, Celery worker, and frontend images
+
+The EBS CSI add-on uses a dedicated IRSA role scoped to its `kube-system` service account. It allows the development Kafka StatefulSet's `gp3` claim to provision an EBS volume; this does not make the single-broker Kafka topology production-ready.
 
 Terraform does not manage Kubernetes application resources. Deploy the application with the [../k8s/charts/distributed-jobs](../k8s/charts/distributed-jobs) Helm chart and `values-eks.yaml`.
 
@@ -17,8 +19,9 @@ Terraform does not manage Kubernetes application resources. Deploy the applicati
 - `variables.tf` declares reusable inputs
 - `locals.tf` derives shared names, tags, and AWS data sources
 - `network.tf` creates the VPC, public/private subnets, NAT, and route wiring through the VPC module
-- `iam.tf` documents that the EKS module manages the required IAM roles and policy attachments
+- `iam.tf` documents that the EKS module manages the control-plane and node-group IAM roles
 - `eks.tf` creates the EKS cluster and managed node group through the EKS module
+- `ebs-csi.tf` creates the EBS CSI add-on's IRSA role and installs its managed add-on
 - `ecr.tf` creates the three ECR repositories used by the application images
 - `outputs.tf` exposes kubeconfig and image-publishing values
 - `backend.hcl.example` shows the uncommitted S3 backend settings for the EKS state

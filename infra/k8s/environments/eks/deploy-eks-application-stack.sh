@@ -27,7 +27,7 @@
 # 12. Renders the chart-owned migration Job with the immutable API image, recreates
 #     it for bootstrap, waits for completion, and prints its logs on failure.
 # 13. Directly applies the rendered Helm application and monitoring manifests, then
-#     waits for PostgreSQL, RabbitMQ, API, worker, and frontend rollouts.
+#     waits for PostgreSQL, RabbitMQ, Kafka, API, worker, and frontend rollouts.
 # 14. Registers the manual-sync dist-jobs-eks Argo CD Application only after the
 #     direct rollout is healthy; Argo CD does not take sync control yet.
 # 15. Verifies that each application Deployment uses the expected immutable ECR image.
@@ -394,6 +394,7 @@ echo "waiting for application workloads"
 for deployment in postgres rabbitmq celery-worker frontend; do
   kubectl rollout status "deployment/${deployment}" --namespace "$NAMESPACE" --timeout=300s
 done
+kubectl rollout status statefulset/kafka --namespace "$NAMESPACE" --timeout=600s
 kubectl wait \
   --for=jsonpath='{.status.phase}'=Healthy \
   rollout/api \
