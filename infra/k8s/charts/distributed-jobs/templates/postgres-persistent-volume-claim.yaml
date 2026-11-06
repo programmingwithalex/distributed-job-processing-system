@@ -1,0 +1,23 @@
+# this template requests the persistent volume mounted by the postgres deployment
+# the claim shares the database sync wave so delayed binding can use the consuming pod
+# retention annotations keep helm uninstall and argo pruning from removing the claim
+# those protections do not prevent manual deletion, and disk retention depends on its storage class
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # bind with the consuming pod rather than waiting in an earlier wave
+    argocd.argoproj.io/sync-wave: "-2"
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- with .Values.postgres.persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.postgres.persistence.size | quote }}

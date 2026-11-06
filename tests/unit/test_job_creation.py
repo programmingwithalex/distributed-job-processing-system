@@ -1,6 +1,17 @@
+"""
+Test that submission and replay save a job together with its two outbox records.
+Check that the execution command references the new job and the initial lifecycle
+event describes the same job within the service's database transaction.
+These tests protect the handoff from HTTP submission to asynchronous delivery
+without requiring RabbitMQ, Kafka, or a running Celery worker.
+They check persistence decisions rather than whether a broker later accepts a message
+or a worker successfully completes the job.
+"""
+
 from uuid import uuid4
 
 from app.common.models.job import JobRecord, JobStatus, JobType
+from app.common.models.job_dispatch_outbox import JobDispatchOutboxRecord
 from app.common.models.job_event_outbox import JobEventOutboxRecord
 from app.common.schemas.job import JobCreateRequest
 from app.common.schemas.job_events import JobLifecycleEventType
@@ -73,6 +84,14 @@ def test_create_job_record_persists_custom_retry_budget() -> None:
     assert job_record.job_type == JobType.UPPERCASE
     assert job_record.maximum_attempt_count == 5
     assert job_record.attempt_count == 0
+    dispatch_records = [
+        record
+        for record in fake_database_session.added_objects
+        if isinstance(record, JobDispatchOutboxRecord)
+    ]
+    assert len(dispatch_records) == 1
+    assert dispatch_records[0].job_id == job_record.id
+    assert dispatch_records[0].dispatched_at is None
     outbox_records = [
         added_object
         for added_object in fake_database_session.added_objects
@@ -111,6 +130,13 @@ def test_create_replayed_job_record_copies_source_job_and_records_lineage() -> N
     assert replayed_job_record.attempt_count == 0
     assert replayed_job_record.maximum_attempt_count == 5
     assert replayed_job_record.replayed_from_job_id == dead_lettered_job_record.id
+    dispatch_records = [
+        record
+        for record in fake_database_session.added_objects
+        if isinstance(record, JobDispatchOutboxRecord)
+    ]
+    assert len(dispatch_records) == 1
+    assert dispatch_records[0].job_id == replayed_job_record.id
     outbox_records = [
         added_object
         for added_object in fake_database_session.added_objects

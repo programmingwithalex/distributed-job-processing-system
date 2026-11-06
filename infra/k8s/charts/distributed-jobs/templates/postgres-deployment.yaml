@@ -1,3 +1,10 @@
+# this template runs one postgres instance and mounts postgres-data for its database files
+# the recreate strategy stops the old pod before its replacement uses the same volume
+# pgdata points to a subdirectory so filesystem metadata does not block database initialization
+# persistence preserves files across pod replacement but does not provide replication or backups
+{{- if ne (int .Values.postgres.replicaCount) 1 }}
+{{- fail "postgres.replicaCount must be 1; this chart does not configure database replication" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,6 +16,8 @@ metadata:
     distributed-jobs.dev/source-revision: {{ .Values.releaseTag | quote }}
 spec:
   replicas: {{ .Values.postgres.replicaCount }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: postgres
@@ -25,7 +34,13 @@ spec:
           imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
           ports:
             - containerPort: 5432
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
           env:
+            # use a subdirectory so filesystem metadata does not prevent initialization
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
             - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
@@ -57,3 +72,7 @@ spec:
                 - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
             initialDelaySeconds: 30
             periodSeconds: 20
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-data

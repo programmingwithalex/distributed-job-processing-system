@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
-# EKS recreation changes its API endpoint; this script refreshes kubeconfig below.
+# this script tears down the eks application stack and its supporting infrastructure
+# retained postgres and rabbitmq ebs volumes are not deleted and require manual recovery or cleanup
+# running teardown removes serving resources, so retained disks alone do not keep the application available
+# eks recreation changes its api endpoint, so this script refreshes kubeconfig before cluster operations
 # For manual kubectl or helm access after redeployment, rerun:
 # aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
 
@@ -89,3 +92,4 @@ if terraform -chdir="$repo_root/infra/terraform" state list | grep -q .; then
 fi
 
 echo "EKS application stack destroyed"
+echo "review retained PostgreSQL and RabbitMQ EBS volumes for manual recovery or cleanup; Terraform does not manage them"

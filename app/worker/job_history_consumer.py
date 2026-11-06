@@ -1,3 +1,13 @@
+"""
+Consume Kafka lifecycle events and build the job-history projection in PostgreSQL.
+Validate each event, persist it through the history service, and commit its Kafka
+consumer offset only after the database operation succeeds.
+Duplicate event IDs do not create duplicate history rows, allowing safe redelivery
+when a crash occurs between the database commit and Kafka offset acknowledgement.
+This process does not execute jobs; its rebuild command reconstructs history from
+retained Kafka records without rerunning the original Celery tasks.
+"""
+
 from __future__ import annotations
 
 import logging

@@ -1,0 +1,19 @@
+# this optional storage class provisions gp3 ebs storage for rabbitmq on eks when a claim requests it
+# delayed binding places the disk in an availability zone compatible with the broker pod
+# the retain policy leaves the underlying disk intact after claim deletion for manual recovery or cleanup
+# retaining a disk does not automatically restore its claim or replicate messages to another broker
+{{- if .Values.rabbitmq.persistence.createStorageClass }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ required "rabbitmq.persistence.storageClassName is required when creating its StorageClass" .Values.rabbitmq.persistence.storageClassName }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  fsType: ext4
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+{{- end }}

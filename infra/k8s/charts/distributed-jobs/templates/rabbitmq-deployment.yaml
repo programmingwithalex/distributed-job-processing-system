@@ -1,3 +1,10 @@
+# this template runs the rabbitmq broker that holds celery execution commands for workers
+# a stable node name lets replacement pods reopen the broker database on rabbitmq-data
+# the recreate strategy prevents old and new broker pods from sharing that database concurrently
+# disk-backed durable queues and persistent messages survive replacement but do not provide broker clustering
+{{- if ne (int .Values.rabbitmq.replicaCount) 1 }}
+{{- fail "rabbitmq.replicaCount must be 1; this chart does not configure broker clustering" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,6 +14,8 @@ metadata:
     distributed-jobs.dev/source-revision: {{ .Values.releaseTag | quote }}
 spec:
   replicas: {{ .Values.rabbitmq.replicaCount }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: rabbitmq
@@ -17,10 +26,17 @@ spec:
       labels:
         app: rabbitmq
     spec:
+      hostname: rabbitmq
       containers:
         - name: rabbitmq
           image: "{{ .Values.rabbitmq.image.repository }}:{{ .Values.rabbitmq.image.tag }}"
           imagePullPolicy: {{ .Values.rabbitmq.image.pullPolicy }}
+          env:
+            - name: RABBITMQ_NODENAME
+              value: rabbit@rabbitmq
+          volumeMounts:
+            - name: rabbitmq-data
+              mountPath: /var/lib/rabbitmq
           ports:
             - containerPort: 5672
             - containerPort: 15672
@@ -50,3 +66,7 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 6
+      volumes:
+        - name: rabbitmq-data
+          persistentVolumeClaim:
+            claimName: rabbitmq-data

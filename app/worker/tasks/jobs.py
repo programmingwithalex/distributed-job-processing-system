@@ -1,13 +1,29 @@
+"""
+Define the Celery task that receives job IDs from RabbitMQ and performs the actual work.
+Load the job from PostgreSQL, acquire its execution lock, and skip redeliveries of
+jobs that already completed or reached a terminal failure state.
+Record execution attempts, results, processing errors, and lifecycle events through
+the job services rather than storing them in the broker-delivery outbox.
+Business retries are scheduled through the transactional dispatch outbox, while
+worker-loss redelivery remains bounded by the job's persisted processing retry budget.
+"""
+
 import logging
 import time
 from uuid import UUID
 
 from celery import Task
+from celery.exceptions import Reject
+from sqlalchemy.exc import OperationalError as DatabaseOperationalError
+from sqlalchemy.orm import Session
 
 from app.common.database import database_session_factory
 from app.common.logging import correlation_identifier_context_scope
 from app.common.models.job import JobStatus, JobType
+from app.common.services.job_execution import job_execution_lock
 from app.common.services.jobs import (
+    calculate_job_retry_delay_seconds as calculate_job_retry_delay_seconds,
+    get_job_record_by_id,
     mark_job_record_completed,
     mark_job_record_processing,
     mark_job_record_queued_for_retry_or_dead_lettered,
@@ -16,8 +32,6 @@ from app.worker.celery_app import celery_app
 
 TRANSIENT_FAILURE_INPUT_PREFIX = "fail-once:"
 PERSISTENT_FAILURE_INPUT_PREFIX = "always-fail:"
-JOB_RETRY_DELAY_INCREMENT_SECONDS = 2
-JOB_RETRY_MAXIMUM_DELAY_SECONDS = 6
 logger = logging.getLogger(__name__)
 
 
@@ -42,23 +56,6 @@ def transform_job_input(input_value: str, job_type: JobType) -> str:
         return input_value.upper()
 
     raise RuntimeError(f"Unsupported job type: {job_type.value}")
-
-
-def calculate_job_retry_delay_seconds(attempt_count: int) -> int:
-    """
-    Calculate a short bounded linear delay from the persisted attempt count.
-
-    Args:
-        attempt_count: Current persisted processing attempt number
-
-    Returns:
-        Retry delay in seconds capped at the configured maximum
-    """
-    bounded_attempt_count = max(attempt_count, 1)
-    return min(
-        JOB_RETRY_DELAY_INCREMENT_SECONDS * bounded_attempt_count,
-        JOB_RETRY_MAXIMUM_DELAY_SECONDS,
-    )
 
 
 def build_processed_result(input_value: str, job_type: JobType, attempt_count: int) -> str:
@@ -93,12 +90,13 @@ def build_processed_result(input_value: str, job_type: JobType, attempt_count: i
 )
 def process_submitted_job(self: Task, job_id: str) -> None:
     """
-    Process a submitted job by updating its persisted lifecycle state.
+    Serialize a job attempt and skip redelivered terminal jobs.
 
-    PostgreSQL remains authoritative for the attempt count and whether another retry
-    is allowed. Celery supplies the bound task instance so retryable failures can use
-    `self.retry()` with short bounded linear backoff while preserving the task identity
-    and Celery retry metadata.
+    The advisory lock remains held across state commits. Late acknowledgement
+    permits worker-loss redelivery; PostgreSQL remains authoritative for the retry
+    budget, including attempts interrupted by worker death. Business retries use
+    the dispatch outbox. Binding supplies `self.retry()` for lock contention while
+    preserving Celery retry metadata.
 
     Args:
         self: Bound Celery task instance used to schedule retries
@@ -109,58 +107,68 @@ def process_submitted_job(self: Task, job_id: str) -> None:
     correlation_identifier = f"job:{job_id}"
     with correlation_identifier_context_scope(correlation_identifier=correlation_identifier):
         try:
-            # persist the attempt before executing job logic
-            job_record = mark_job_record_processing(
-                database_session=database_session,
-                job_id=parsed_job_id,
-            )
-            if job_record is None:
-                logger.warning("Skipped processing because job %s was not found", job_id)
-                return
-
-            logger.info(
-                "Processing job %s type %s attempt %s of %s",
-                job_record.id,
-                job_record.job_type.value,
-                job_record.attempt_count,
-                job_record.maximum_attempt_count,
-            )
-            processed_result = build_processed_result(
-                input_value=job_record.input_value,
-                job_type=job_record.job_type,
-                attempt_count=job_record.attempt_count,
-            )
-            mark_job_record_completed(
-                database_session=database_session,
-                job_id=parsed_job_id,
-                processed_result=processed_result,
-            )
-            logger.info("Completed job %s", job_record.id)
-        except RuntimeError as processing_error:
-            # let the persisted retry budget choose requeue or dead-letter state
-            updated_job_record = mark_job_record_queued_for_retry_or_dead_lettered(
-                database_session=database_session,
-                job_id=parsed_job_id,
-                failure_message=str(processing_error),
-            )
-            if updated_job_record is not None and updated_job_record.status == JobStatus.QUEUED:
-                retry_delay_seconds = calculate_job_retry_delay_seconds(
-                    attempt_count=updated_job_record.attempt_count,
-                )
-                logger.warning(
-                    "Retrying job %s in %s seconds after attempt %s of %s failed",
-                    updated_job_record.id,
-                    retry_delay_seconds,
-                    updated_job_record.attempt_count,
-                    updated_job_record.maximum_attempt_count,
-                )
-                # schedule short bounded backoff while preserving Celery task identity
-                raise self.retry(
-                    exc=processing_error,
-                    countdown=retry_delay_seconds,
-                )
-
-            logger.error("Job %s failed permanently", job_id)
-            raise
+            with job_execution_lock(parsed_job_id) as acquired:
+                if not acquired:
+                    raise self.retry(countdown=2)
+                current_job = get_job_record_by_id(database_session, parsed_job_id)
+                if current_job is None or current_job.status in (
+                    JobStatus.COMPLETED,
+                    JobStatus.DEAD_LETTERED,
+                    JobStatus.FAILED,
+                ):
+                    logger.info("Skipped missing or terminal job %s", job_id)
+                    return
+                if current_job.attempt_count >= current_job.maximum_attempt_count:
+                    mark_job_record_queued_for_retry_or_dead_lettered(
+                        database_session,
+                        parsed_job_id,
+                        failure_message="Retry budget exhausted after an interrupted attempt",
+                    )
+                    return
+                execute_job_attempt(database_session, parsed_job_id)
+        except DatabaseOperationalError as database_error:
+            database_session.rollback()
+            logger.warning("Database unavailable during job %s: %s", job_id, database_error)
+            time.sleep(1)
+            raise Reject("database unavailable", requeue=True) from database_error
         finally:
             database_session.close()
+
+
+def execute_job_attempt(database_session: Session, job_id: UUID) -> None:
+    """
+    Run one attempt while the caller holds the job's execution lock.
+
+    Args:
+        database_session: Session used for independently committed state transitions
+        job_id: Job being processed under the advisory lock
+    """
+    try:
+        job_record = mark_job_record_processing(database_session=database_session, job_id=job_id)
+        if job_record is None:
+            return
+        logger.info(
+            "Processing job %s type %s attempt %s of %s",
+            job_record.id,
+            job_record.job_type.value,
+            job_record.attempt_count,
+            job_record.maximum_attempt_count,
+        )
+        processed_result = build_processed_result(
+            input_value=job_record.input_value,
+            job_type=job_record.job_type,
+            attempt_count=job_record.attempt_count,
+        )
+        mark_job_record_completed(
+            database_session=database_session, job_id=job_id, processed_result=processed_result
+        )
+        logger.info("Completed job %s", job_id)
+    except RuntimeError as processing_error:
+        updated_job_record = mark_job_record_queued_for_retry_or_dead_lettered(
+            database_session=database_session, job_id=job_id, failure_message=str(processing_error)
+        )
+        if updated_job_record is not None and updated_job_record.status == JobStatus.QUEUED:
+            logger.info("Durably scheduled retry for job %s", job_id)
+            return
+        logger.error("Job %s failed permanently", job_id)
+        raise

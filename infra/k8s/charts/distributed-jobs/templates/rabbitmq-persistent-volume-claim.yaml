@@ -1,0 +1,21 @@
+# this template requests the persistent volume mounted at the rabbitmq broker's data directory
+# reusing the claim lets a replacement broker recover its stored queue and message data
+# helm and argo retention annotations prevent ordinary release removal from deleting the claim
+# manual claim deletion is still possible, and recovery also depends on the storage class reclaim policy
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rabbitmq-data
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- with .Values.rabbitmq.persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.rabbitmq.persistence.size | quote }}

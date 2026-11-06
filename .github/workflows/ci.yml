@@ -1,3 +1,7 @@
+# this workflow validates application code and deployment configuration on pull requests
+# its checks cover backend tests, frontend validation, and rendered helm infrastructure contracts
+# storage and background-worker assertions catch changes that could break durable delivery or history processing
+# these checks require no aws credentials and do not prove live eks disk recovery or deploy a release
 name: Continuous Integration
 
 # validate every pull request without requiring AWS credentials
@@ -79,16 +83,36 @@ jobs:
           # run PostgreSQL first, the migration hook second, and application workloads last
           grep -Fq 'argocd.argoproj.io/hook: Sync' "$rendered_manifest"
           grep -Fq 'argocd.argoproj.io/hook-delete-policy: BeforeHookCreation' "$rendered_manifest"
-          test "$(grep -Fc 'argocd.argoproj.io/sync-wave: "-2"' "$rendered_manifest")" -eq 2
+          test "$(grep -Fc 'argocd.argoproj.io/sync-wave: "-2"' "$rendered_manifest")" -eq 3
           grep -Fq 'argocd.argoproj.io/sync-wave: "-1"' "$rendered_manifest"
 
-          # keep the persistent single-broker Kafka topology explicitly EKS-development-only
+          # keep database storage mounted and separate from the Deployment lifecycle
+          for manifest in "$rendered_manifest" "$local_manifest"; do
+            grep -Fq 'claimName: postgres-data' "$manifest"
+            grep -Fq 'value: /var/lib/postgresql/data/pgdata' "$manifest"
+            grep -Fq 'type: Recreate' "$manifest"
+            grep -Fq 'helm.sh/resource-policy: keep' "$manifest"
+          done
+          grep -Fq 'storageClassName: "dist-jobs-postgres-gp3"' "$rendered_manifest"
+          grep -Fq 'reclaimPolicy: Retain' "$rendered_manifest"
+          ! grep -Fq 'dist-jobs-postgres-gp3' "$local_manifest"
+
+          # render Kafka and all background workers in both supported environments
           grep -Fq 'kind: StatefulSet' "$rendered_manifest"
           grep -Fq 'name: kafka-headless' "$rendered_manifest"
           grep -Fq 'storageClassName: "dist-jobs-kafka-gp3"' "$rendered_manifest"
           grep -Fq 'value: "604800000"' "$rendered_manifest"
-          ! grep -Fq 'name: kafka-headless' "$local_manifest"
-          ! grep -Fq 'kind: StatefulSet' "$local_manifest"
+          grep -Fq 'name: kafka-headless' "$local_manifest"
+          ! grep -Fq 'dist-jobs-kafka-gp3' "$local_manifest"
+          for manifest in "$rendered_manifest" "$local_manifest"; do
+            grep -Fq 'claimName: rabbitmq-data' "$manifest"
+            grep -Fq 'value: rabbit@rabbitmq' "$manifest"
+            for worker in job-dispatcher outbox-publisher history-consumer; do
+              grep -Fq "name: $worker" "$manifest"
+            done
+          done
+          grep -Fq 'storageClassName: "dist-jobs-rabbitmq-gp3"' "$rendered_manifest"
+          ! grep -Fq 'dist-jobs-rabbitmq-gp3' "$local_manifest"
 
           # require one atomic immutable release across every application image
           for repository in \

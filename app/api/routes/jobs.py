@@ -1,3 +1,13 @@
+"""
+Expose HTTP endpoints for submitting jobs, replaying failures, and reading status or history.
+Submission and replay call database services that atomically save a job, an execution
+command for RabbitMQ, and an initial lifecycle event for Kafka.
+Return the committed job to the caller without waiting for broker delivery or worker
+completion; independent background processes handle those later steps.
+Status comes from the jobs table and the timeline comes from PostgreSQL's projected
+history, so these routes do not query Kafka or contact Celery workers directly.
+"""
+
 import logging
 from uuid import UUID
 
@@ -15,7 +25,6 @@ from app.common.services.jobs import (
     list_job_records,
 )
 from app.common.services.job_history import list_job_history_events
-from app.worker.tasks.jobs import process_submitted_job
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 logger = logging.getLogger(__name__)
@@ -27,7 +36,7 @@ def submit_job(
     database_session: Session = Depends(get_database_session),
 ) -> JobStatusResponse:
     """
-    Create a queued job record and dispatch it to the Celery worker.
+    Commit a queued job and its recoverable execution command.
 
     Args:
         job_create_request: Validated job submission payload
@@ -42,7 +51,6 @@ def submit_job(
         job_type=job_create_request.job_type,
         maximum_attempt_count=job_create_request.maximum_attempt_count,
     )
-    process_submitted_job.delay(str(job_record.id))
     logger.info(
         "Submitted job %s with type %s and input %s",
         job_record.id,
@@ -62,7 +70,7 @@ def replay_dead_lettered_job(
     database_session: Session = Depends(get_database_session),
 ) -> JobStatusResponse:
     """
-    Create and dispatch a new job from a dead-lettered source job.
+    Commit a new job and execution command from a dead-lettered source job.
 
     The source remains unchanged as failure history while the new queued job records
     its lineage through `replayed_from_job_id`.
@@ -94,8 +102,6 @@ def replay_dead_lettered_job(
             detail=str(replay_error),
         ) from replay_error
 
-    # dispatch only after the replay row and its lineage are committed
-    process_submitted_job.delay(str(replayed_job_record.id))
     logger.info("Replayed dead-lettered job %s as job %s", job_id, replayed_job_record.id)
     return JobStatusResponse.model_validate(replayed_job_record)
 

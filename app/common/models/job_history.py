@@ -1,3 +1,12 @@
+"""
+Define the PostgreSQL table containing queryable job history projected from Kafka events.
+The history consumer stores event payloads and their job sequence numbers here after
+validating messages, while unique identifiers prevent duplicate history entries.
+The API reads this table to display a job's timeline instead of querying Kafka directly.
+This is neither Kafka's internal storage schema nor an outbox awaiting publication;
+it is the downstream database view built from events already received from Kafka.
+"""
+
 import uuid
 from datetime import datetime
 from typing import Any

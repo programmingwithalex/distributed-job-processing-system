@@ -1,6 +1,18 @@
+# this file overrides shared chart defaults for an eks release using an immutable source-revision image tag
+# it selects dedicated gp3 ebs storage classes for postgres and rabbitmq with retained disk policies
+# those disks support pod replacement but require deliberate recovery and cleanup after claim or cluster removal
+# the selected image must already contain the configured background commands before deploying the release
 releaseTag: "d7700fdff50ba3b11e8100f50cca1a9fd8bd87e3"
 config:
   appEnv: eks
+postgres:
+  persistence:
+    createStorageClass: true
+    storageClassName: dist-jobs-postgres-gp3
+rabbitmq:
+  persistence:
+    createStorageClass: true
+    storageClassName: dist-jobs-rabbitmq-gp3
 kafka:
   # this single broker is an EKS development exercise, not a production topology
   enabled: true

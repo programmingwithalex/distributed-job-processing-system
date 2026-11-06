@@ -1,3 +1,13 @@
+"""
+Test replay behavior for dead-lettered jobs through the API and job services.
+Verify that a replay creates a new job linked to its source and that invalid replay
+requests return the expected errors without altering the original job's result.
+Execution delivery remains asynchronous through the dispatch outbox rather than
+requiring the route to publish directly to a Celery broker.
+These tests cover replay eligibility and lineage, not Kafka history reconstruction
+or the eventual execution of the replayed job.
+"""
+
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
@@ -29,8 +39,8 @@ def build_dead_lettered_job_record() -> JobRecord:
     )
 
 
-def test_replay_dead_lettered_job_creates_and_dispatches_linked_job() -> None:
-    """Verify replay persists and dispatches a new job linked to its source."""
+def test_replay_dead_lettered_job_creates_linked_job() -> None:
+    """Verify replay returns a job whose execution command is saved by the service."""
     database_session = MagicMock()
     source_job_record = build_dead_lettered_job_record()
     current_timestamp = datetime.now(UTC)
@@ -52,7 +62,6 @@ def test_replay_dead_lettered_job_creates_and_dispatches_linked_job() -> None:
             "app.api.routes.jobs.create_replayed_job_record",
             return_value=replayed_job_record,
         ),
-        patch("app.api.routes.jobs.process_submitted_job.delay") as dispatch_mock,
     ):
         replay_response = replay_dead_lettered_job(
             job_id=source_job_record.id,
@@ -61,7 +70,6 @@ def test_replay_dead_lettered_job_creates_and_dispatches_linked_job() -> None:
 
     assert replay_response.id == replayed_job_record.id
     assert replay_response.replayed_from_job_id == source_job_record.id
-    dispatch_mock.assert_called_once_with(str(replayed_job_record.id))
 
 
 def test_replay_dead_lettered_job_returns_not_found_for_missing_source() -> None:
