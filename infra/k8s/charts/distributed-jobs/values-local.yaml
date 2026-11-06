@@ -1,5 +1,11 @@
-# local overrides and development secrets for the shared distributed-jobs Helm chart
+# this file overrides shared chart defaults for the local kubernetes development environment
+# it enables kafka and supplies development-only connection settings through the application secret
+# persistent claims use the local cluster's default storage provisioner rather than eks ebs classes
+# these credentials and mutable development image tags are not production deployment inputs
 releaseTag: latest
+
+kafka:
+  enabled: true
 
 applicationSecret:
   create: true

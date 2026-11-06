@@ -1,3 +1,13 @@
+"""
+Define the PostgreSQL table that retains each job lifecycle event before Kafka delivery.
+Job services save a structured event payload in the same transaction as the job's
+state change, preserving transitions that polling only the latest jobs row would miss.
+The Kafka publisher reads these rows and stores delivery confirmations, retry timing,
+and publication errors without changing the worker's execution result.
+This table feeds Kafka rather than RabbitMQ and is separate from the dispatch outbox
+that carries execution commands and the history table read by the API.
+"""
+
 import uuid
 from datetime import datetime
 from typing import Any

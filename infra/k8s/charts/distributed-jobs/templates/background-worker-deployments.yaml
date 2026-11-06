@@ -1,0 +1,58 @@
+# this template runs separate background processes using the same release image as the celery worker
+# the dispatcher reads postgres commands and publishes job ids to rabbitmq without executing jobs
+# the publisher forwards lifecycle events to kafka, and the consumer projects them into postgres history
+# the dispatcher is always enabled while the publisher and consumer run only when kafka is enabled
+{{- $workers := list
+  (dict "name" "job-dispatcher" "command" "dispatch-jobs" "enabled" true)
+  (dict "name" "outbox-publisher" "command" "publish-job-events" "enabled" .Values.kafka.enabled)
+  (dict "name" "history-consumer" "command" "consume-job-events" "enabled" .Values.kafka.enabled)
+}}
+{{- range $workers }}
+{{- if .enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    distributed-jobs.dev/source-revision: {{ $.Values.releaseTag | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .name }}
+      annotations:
+        distributed-jobs.dev/source-revision: {{ $.Values.releaseTag | quote }}
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: {{ .name }}
+          image: "{{ $.Values.celeryWorker.image.repository }}:{{ $.Values.releaseTag }}"
+          imagePullPolicy: {{ $.Values.celeryWorker.image.pullPolicy }}
+          command: [{{ .command | quote }}]
+          envFrom:
+            - configMapRef:
+                name: application-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: application-secrets
+                  key: DATABASE_URL
+            {{- if eq .name "job-dispatcher" }}
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: application-secrets
+                  key: CELERY_BROKER_URL
+            {{- end }}
+          resources:
+            {{- toYaml $.Values.backgroundWorkers.resources | nindent 12 }}
+{{- end }}
+{{- end }}

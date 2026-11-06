@@ -1,3 +1,13 @@
+"""
+Run the background publisher that forwards PostgreSQL lifecycle-outbox events to Kafka.
+Publish each stored payload using its job ID as the message key, preserve per-job
+event ordering, and record Kafka acknowledgements or retryable publication failures.
+A crash after broker acknowledgement can publish the same event again, so the
+downstream history consumer uses event IDs to suppress duplicate history entries.
+This process does not dispatch Celery commands, execute jobs, or wait for the history
+consumer to finish; successful publication means Kafka accepted the event.
+"""
+
 from __future__ import annotations
 
 import json

@@ -1,4 +1,14 @@
-from datetime import UTC, datetime
+"""
+Manage PostgreSQL job records, including processing status, execution attempts, and results.
+Commit a new job together with its RabbitMQ dispatch command and initial Kafka
+lifecycle event so a saved job cannot lack its corresponding delivery records.
+Later processing transitions save lifecycle events alongside the updated job, and
+retryable failures reset the dispatch command with its next delivery time.
+These functions perform database work only; background publishers contact the brokers,
+while Celery workers call these functions to record what happened during execution.
+"""
+
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import Select, select
@@ -6,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.common.config import get_application_settings
 from app.common.models.job import JobRecord, JobStatus, JobType
+from app.common.models.job_dispatch_outbox import JobDispatchOutboxRecord
 from app.common.schemas.job_events import JobLifecycleEventType
 from app.common.services.job_events import add_job_lifecycle_event_to_outbox
 
@@ -66,7 +77,7 @@ def _persist_new_job_record(
     replayed_from_job_id: UUID | None,
     event_type: JobLifecycleEventType,
 ) -> JobRecord:
-    """Persist a new job and its initial lifecycle event in one transaction.
+    """Persist a job, execution command, and initial lifecycle event atomically.
 
     Args:
         database_session: Session used for the atomic database write
@@ -86,10 +97,13 @@ def _persist_new_job_record(
         status=JobStatus.QUEUED,
         attempt_count=0,
         lifecycle_event_sequence=0,
-        maximum_attempt_count=resolve_job_maximum_attempt_count(maximum_attempt_count=maximum_attempt_count),
+        maximum_attempt_count=resolve_job_maximum_attempt_count(
+            maximum_attempt_count=maximum_attempt_count
+        ),
         replayed_from_job_id=replayed_from_job_id,
     )
     database_session.add(job_record)
+    database_session.add(JobDispatchOutboxRecord(job_id=job_record.id, attempt_count=0))
     add_job_lifecycle_event_to_outbox(
         database_session=database_session,
         job_record=job_record,
@@ -179,7 +193,9 @@ def build_job_record_listing_statement(
     )
 
     if status_filter is not None:
-        job_record_listing_statement = job_record_listing_statement.where(JobRecord.status == status_filter)
+        job_record_listing_statement = job_record_listing_statement.where(
+            JobRecord.status == status_filter
+        )
 
     return job_record_listing_statement.limit(limit).offset(offset)
 
@@ -253,6 +269,19 @@ def job_record_has_attempts_remaining(job_record: JobRecord) -> bool:
         True when another processing attempt is available
     """
     return job_record.attempt_count < job_record.maximum_attempt_count
+
+
+def calculate_job_retry_delay_seconds(attempt_count: int) -> int:
+    """
+    Return a bounded linear backoff for a durably scheduled business retry.
+
+    Args:
+        attempt_count: Number of persisted execution attempts
+
+    Returns:
+        Retry delay between two and six seconds
+    """
+    return min(max(attempt_count, 1) * 2, 6)
 
 
 def build_post_failure_job_status(job_record: JobRecord) -> JobStatus:
@@ -347,6 +376,9 @@ def mark_job_record_queued_for_retry_or_dead_lettered(
     """
     Persist a failed attempt and either requeue or dead-letter the job.
 
+    Retryable failures reset the execution command in the same transaction so
+    RabbitMQ outages cannot strand a committed retry.
+
     Args:
         database_session: SQLAlchemy session used for persistence work
         job_id: Identifier of the job whose attempt failed
@@ -365,6 +397,15 @@ def mark_job_record_queued_for_retry_or_dead_lettered(
     job_record.dead_lettered_at = (
         datetime.now(UTC) if job_record.status == JobStatus.DEAD_LETTERED else None
     )
+    if job_record.status == JobStatus.QUEUED:
+        dispatch_record = database_session.get(JobDispatchOutboxRecord, job_id)
+        if dispatch_record is None:
+            dispatch_record = JobDispatchOutboxRecord(job_id=job_id, attempt_count=0)
+            database_session.add(dispatch_record)
+        dispatch_record.dispatched_at = None
+        dispatch_record.next_attempt_at = datetime.now(UTC) + timedelta(
+            seconds=calculate_job_retry_delay_seconds(job_record.attempt_count)
+        )
     lifecycle_event_type = (
         JobLifecycleEventType.RETRY_SCHEDULED
         if job_record.status == JobStatus.QUEUED

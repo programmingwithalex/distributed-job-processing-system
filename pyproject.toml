@@ -1,3 +1,7 @@
+# this file defines the python package, supported interpreter range, and application dependencies
+# console entry points start execution dispatch, kafka event publication, and history consumption
+# development settings configure lint and test tools independently of the running application
+# installing this package makes commands available but does not start workers or deploy broker infrastructure
 [project]
 name = "distributed-job-processing-system"
 version = "0.1.0"
@@ -24,6 +28,7 @@ dev = [
 ]
 
 [project.scripts]
+dispatch-jobs = "app.worker.job_dispatcher:main"
 seed-dummy-jobs = "app.common.seed_jobs:main"
 publish-job-events = "app.worker.outbox_publisher:main"
 consume-job-events = "app.worker.job_history_consumer:main"

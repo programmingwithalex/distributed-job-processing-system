@@ -1,0 +1,19 @@
+# this optional storage class tells the ebs csi driver how to provision postgres gp3 disks on eks
+# delayed binding waits for the database pod so its disk is created in a compatible availability zone
+# the retain policy preserves the underlying disk after claim deletion for manual recovery or cleanup
+# this class creates no disk by itself and provides neither database backups nor cross-zone replication
+{{- if .Values.postgres.persistence.createStorageClass }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ required "postgres.persistence.storageClassName is required when creating its StorageClass" .Values.postgres.persistence.storageClassName }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  fsType: ext4
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+{{- end }}

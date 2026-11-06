@@ -1,10 +1,24 @@
+"""
+Test how Celery job execution handles failures, duplicate commands, and retry limits.
+Verify processing-state transitions and lifecycle events, durable business retries,
+terminal-state no-ops, and the per-job advisory lock's ownership behavior.
+Distinguish persisted job execution attempts from dispatch-outbox delivery attempts
+so broker redelivery cannot silently bypass the processing retry budget.
+External systems are mocked here; live broker persistence and worker-restart recovery
+must be validated separately from these unit-level decisions.
+"""
+
+from contextlib import nullcontext
 from inspect import ismethod
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+import pytest
+
 from app.common.models.job import JobRecord, JobStatus, JobType
 from app.common.models.job_event_outbox import JobEventOutboxRecord
 from app.common.schemas.job_events import JobLifecycleEventType
+from app.common.services.job_execution import job_execution_lock
 from app.common.services.jobs import (
     build_post_failure_job_status,
     job_record_has_attempts_remaining,
@@ -67,6 +81,26 @@ def test_process_submitted_job_is_bound_to_celery_task_instance() -> None:
     """Verify Celery binds the registered task instance to the task implementation."""
     assert ismethod(process_submitted_job.run)
     assert callable(process_submitted_job.retry)
+    assert process_submitted_job.app.conf.task_acks_late is True
+    assert process_submitted_job.app.conf.task_reject_on_worker_lost is True
+    assert process_submitted_job.app.conf.broker_transport_options["confirm_publish"] is True
+
+
+@pytest.mark.parametrize("acquired", [True, False])
+def test_execution_lock_releases_its_independent_transaction(acquired: bool) -> None:
+    """
+    Keep the transaction scoped to the execution context and release it on exit.
+
+    Args:
+        acquired: Whether PostgreSQL reports ownership of the job lock
+    """
+    with patch("app.common.services.job_execution.database_engine.begin") as begin:
+        connection = begin.return_value.__enter__.return_value
+        connection.execute.return_value.scalar_one.return_value = acquired
+        with job_execution_lock(uuid4()) as owns_lock:
+            assert owns_lock is acquired
+            begin.return_value.__exit__.assert_not_called()
+        begin.return_value.__exit__.assert_called_once()
 
 
 def test_calculate_job_retry_delay_seconds_applies_short_bounded_linear_backoff() -> None:
@@ -77,14 +111,15 @@ def test_calculate_job_retry_delay_seconds_applies_short_bounded_linear_backoff(
     assert calculate_job_retry_delay_seconds(attempt_count=10) == 6
 
 
-def test_process_submitted_job_uses_celery_retry_when_job_remains_queued() -> None:
-    """Verify a retryable failure asks Celery to schedule the next attempt."""
+def test_process_submitted_job_leaves_business_retry_to_dispatch_outbox() -> None:
+    """Verify a retryable failure avoids a second nontransactional broker publish."""
     database_session = MagicMock()
     job_record = build_job_record_for_retry_testing(attempt_count=1, maximum_attempt_count=3)
     processing_error = RuntimeError("transient failure")
-    celery_retry_signal = RuntimeError("celery retry requested")
 
     with (
+        patch("app.worker.tasks.jobs.job_execution_lock", return_value=nullcontext(True)),
+        patch("app.worker.tasks.jobs.get_job_record_by_id", return_value=job_record),
         patch("app.worker.tasks.jobs.database_session_factory", return_value=database_session),
         patch("app.worker.tasks.jobs.mark_job_record_processing", return_value=job_record),
         patch("app.worker.tasks.jobs.build_processed_result", side_effect=processing_error),
@@ -95,20 +130,11 @@ def test_process_submitted_job_uses_celery_retry_when_job_remains_queued() -> No
         patch.object(
             process_submitted_job,
             "retry",
-            return_value=celery_retry_signal,
         ) as retry_mock,
     ):
-        try:
-            process_submitted_job.run(str(uuid4()))
-        except RuntimeError as raised_error:
-            assert raised_error is celery_retry_signal
-        else:
-            raise AssertionError("Expected the Celery retry signal")
+        process_submitted_job.run(str(uuid4()))
 
-    retry_mock.assert_called_once_with(
-        exc=processing_error,
-        countdown=calculate_job_retry_delay_seconds(attempt_count=job_record.attempt_count),
-    )
+    retry_mock.assert_not_called()
     database_session.close.assert_called_once_with()
 
 
@@ -120,6 +146,13 @@ def test_process_submitted_job_does_not_retry_dead_lettered_job() -> None:
     processing_error = RuntimeError("persistent failure")
 
     with (
+        patch("app.worker.tasks.jobs.job_execution_lock", return_value=nullcontext(True)),
+        patch(
+            "app.worker.tasks.jobs.get_job_record_by_id",
+            return_value=build_job_record_for_retry_testing(
+                attempt_count=2, maximum_attempt_count=3
+            ),
+        ),
         patch("app.worker.tasks.jobs.database_session_factory", return_value=database_session),
         patch("app.worker.tasks.jobs.mark_job_record_processing", return_value=job_record),
         patch("app.worker.tasks.jobs.build_processed_result", side_effect=processing_error),
@@ -140,6 +173,59 @@ def test_process_submitted_job_does_not_retry_dead_lettered_job() -> None:
     database_session.close.assert_called_once_with()
 
 
+@pytest.mark.parametrize(
+    "terminal_status", [JobStatus.COMPLETED, JobStatus.DEAD_LETTERED, JobStatus.FAILED]
+)
+def test_redelivered_terminal_job_does_not_execute(terminal_status: JobStatus) -> None:
+    """
+    Skip completed or permanently failed jobs without creating another attempt.
+
+    Args:
+        terminal_status: Persisted state that must suppress redelivery
+    """
+    job_record = build_job_record_for_retry_testing(1, 3)
+    job_record.status = terminal_status
+    with (
+        patch("app.worker.tasks.jobs.job_execution_lock", return_value=nullcontext(True)),
+        patch("app.worker.tasks.jobs.get_job_record_by_id", return_value=job_record),
+        patch("app.worker.tasks.jobs.database_session_factory"),
+        patch("app.worker.tasks.jobs.execute_job_attempt") as execute,
+    ):
+        process_submitted_job.run(str(job_record.id))
+    execute.assert_not_called()
+
+
+def test_concurrent_delivery_retries_without_starting_an_attempt() -> None:
+    """Do not execute while another worker holds the same job lock."""
+    retry_signal = RuntimeError("lock busy")
+    with (
+        patch("app.worker.tasks.jobs.job_execution_lock", return_value=nullcontext(False)),
+        patch("app.worker.tasks.jobs.database_session_factory"),
+        patch("app.worker.tasks.jobs.execute_job_attempt") as execute,
+        patch.object(process_submitted_job, "retry", return_value=retry_signal) as retry,
+    ):
+        with pytest.raises(RuntimeError, match="lock busy"):
+            process_submitted_job.run(str(uuid4()))
+    retry.assert_called_once_with(countdown=2)
+    execute.assert_not_called()
+
+
+def test_interrupted_attempt_with_exhausted_budget_is_dead_lettered() -> None:
+    """Bound worker-loss redelivery by the persisted attempt budget."""
+    job_record = build_job_record_for_retry_testing(3, 3)
+    job_record.status = JobStatus.PROCESSING
+    with (
+        patch("app.worker.tasks.jobs.job_execution_lock", return_value=nullcontext(True)),
+        patch("app.worker.tasks.jobs.get_job_record_by_id", return_value=job_record),
+        patch("app.worker.tasks.jobs.database_session_factory"),
+        patch("app.worker.tasks.jobs.execute_job_attempt") as execute,
+        patch("app.worker.tasks.jobs.mark_job_record_queued_for_retry_or_dead_lettered") as fail,
+    ):
+        process_submitted_job.run(str(job_record.id))
+    fail.assert_called_once()
+    execute.assert_not_called()
+
+
 def test_job_record_has_attempts_remaining_returns_true_before_retry_budget_is_exhausted() -> None:
     """Verify a job remains retryable while it has unused attempts."""
     job_record = build_job_record_for_retry_testing(attempt_count=1, maximum_attempt_count=3)
@@ -147,7 +233,9 @@ def test_job_record_has_attempts_remaining_returns_true_before_retry_budget_is_e
     assert job_record_has_attempts_remaining(job_record=job_record) is True
 
 
-def test_build_post_failure_job_status_returns_dead_lettered_when_retry_budget_is_exhausted() -> None:
+def test_build_post_failure_job_status_returns_dead_lettered_when_retry_budget_is_exhausted() -> (
+    None
+):
     """Verify exhausted jobs move to the dead-letter state."""
     job_record = build_job_record_for_retry_testing(attempt_count=3, maximum_attempt_count=3)
 
@@ -169,6 +257,8 @@ def test_retryable_failure_does_not_set_dead_lettered_timestamp() -> None:
     assert updated_job_record is not None
     assert updated_job_record.status == JobStatus.QUEUED
     assert updated_job_record.dead_lettered_at is None
+    assert database_session.get.return_value.dispatched_at is None
+    assert database_session.get.return_value.next_attempt_at is not None
     outbox_record = get_outbox_record(database_session=database_session)
     assert outbox_record.event_type == JobLifecycleEventType.RETRY_SCHEDULED.value
     assert outbox_record.payload["error_message"] == "transient failure"

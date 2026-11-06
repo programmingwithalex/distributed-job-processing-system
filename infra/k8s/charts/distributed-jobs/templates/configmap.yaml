@@ -1,3 +1,7 @@
+# this template provides non-secret runtime settings shared by the api and background processes
+# kafka settings identify the in-cluster broker, lifecycle topic, and history consumer group
+# database and rabbitmq credentials are supplied separately through secrets rather than this config map
+# these settings configure existing processes but do not create topics or send execution commands
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,3 +16,7 @@ data:
   API_PORT: {{ .Values.config.apiPort | quote }}
   DEFAULT_MAXIMUM_ATTEMPT_COUNT: {{ .Values.config.defaultMaximumAttemptCount | quote }}
   API_PROXY_TARGET: {{ .Values.config.apiProxyTarget | quote }}
+  KAFKA_BOOTSTRAP_SERVERS: {{ printf "kafka.%s.svc.%s:9092" .Release.Namespace .Values.kafka.clusterDomain | quote }}
+  JOB_EVENTS_TOPIC: job-events.v1
+  JOB_EVENTS_PARTITION_COUNT: "3"
+  JOB_HISTORY_CONSUMER_GROUP: job-history-v1

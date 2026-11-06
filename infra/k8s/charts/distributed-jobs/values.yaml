@@ -1,5 +1,8 @@
-# always loaded by default, values-local.yaml and values-eks.yaml enhance/override these default values
-# `helm upgrade --install <release-name> <chart-path> -f values-eks.yaml`
+# this file supplies the shared defaults helm loads before environment-specific overrides
+# it configures application images, process resources, broker settings, and persistent storage requests
+# local and eks values override these defaults rather than maintaining separate deployment templates
+# empty storage class names use the cluster default, while eks overrides can request dedicated ebs classes
+# helm upgrade --install <release-name> <chart-path> -f values-eks.yaml
 releaseTag: latest
 
 applicationSecret:
@@ -16,6 +19,10 @@ config:
 
 postgres:
   replicaCount: 1
+  persistence:
+    createStorageClass: false
+    storageClassName: ""
+    size: 10Gi
   image:
     repository: postgres
     tag: "16"
@@ -23,6 +30,10 @@ postgres:
 
 rabbitmq:
   replicaCount: 1
+  persistence:
+    createStorageClass: false
+    storageClassName: ""
+    size: 5Gi
   image:
     repository: rabbitmq
     tag: 3.13-management
@@ -63,6 +74,15 @@ celeryWorker:
   image:
     repository: distributed-job-processing-system-celery_worker
     pullPolicy: IfNotPresent
+
+backgroundWorkers:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
 
 keda:
   celeryWorker:

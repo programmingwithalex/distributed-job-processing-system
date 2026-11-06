@@ -31,9 +31,13 @@ docker compose up --build
 
 The frontend will be available at <http://localhost:5173> and the API will be available at <http://localhost:8000>.
 
-Compose starts a single-node Kafka KRaft broker, an outbox publisher, and a history consumer. The application publishes typed lifecycle events to `job-events.v1`, keyed by job ID; host-side Kafka clients can connect to <localhost:29092>.
+Compose starts a durable job dispatcher, a single-node Kafka KRaft broker, an outbox publisher, and a history consumer. The application publishes typed lifecycle events to `job-events.v1`, keyed by job ID; host-side Kafka clients can connect to <localhost:29092>.
 
-PostgreSQL commits each job transition and its outbox event together. The publisher retries unacknowledged events with capped exponential backoff, and the history consumer deduplicates by event ID before committing its Kafka offset. This makes lifecycle-event publication reliable; Celery dispatch still happens separately after the job transaction and is not covered by the outbox.
+PostgreSQL commits each new job, its execution command, and its initial lifecycle event together. The dispatcher sends pending commands to RabbitMQ with publisher confirmations, stable task IDs, and capped exponential backoff. Retryable processing failures reset the dispatch record in the same transaction as job state. The API does not publish execution commands directly, so a broker outage does not create a commit-then-send gap.
+
+Workers use late acknowledgement, worker-loss redelivery, and PostgreSQL advisory locks to serialize each job across processes. Terminal jobs are skipped on redelivery, and interrupted attempts still count toward the retry budget. This is at-least-once delivery with duplicate-safe processing for the current database-backed transformations, not an exactly-once guarantee for future external side effects. External writes must use the job ID as a destination-supported idempotency key or another transactional mechanism.
+
+Lifecycle publication remains independent: the Kafka publisher retries unacknowledged events, and the history consumer deduplicates by event ID before committing its Kafka offset. PostgreSQL remains the system of record for queryable job history.
 
 The dashboard's operations strip reports completed jobs per minute and retry/dead-letter rates over a rolling five-minute window, plus the pending outbox count and the offset lag between Kafka publication and PostgreSQL history projection.
 
@@ -78,6 +82,12 @@ Start the worker:
 
 ```bash
 uv run celery -A app.worker.celery_app:celery_app worker --loglevel=info
+```
+
+Start the dispatcher in another terminal; submitted jobs remain queued without it:
+
+```bash
+uv run dispatch-jobs
 ```
 
 ## Run the React frontend

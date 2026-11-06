@@ -1,3 +1,13 @@
+"""
+Define the versioned lifecycle-event payload shared by Kafka producers and consumers.
+Pydantic validates fields such as event ID, job ID, sequence number, status, and
+processing attempt count before the application accepts or serializes an event.
+This schema describes application message content rather than a PostgreSQL table
+or a database schema owned and enforced by the Kafka broker.
+The event outbox stores these payloads before publication, and the history consumer
+validates them before creating PostgreSQL history rows.
+"""
+
 import enum
 import uuid
 from datetime import UTC, datetime

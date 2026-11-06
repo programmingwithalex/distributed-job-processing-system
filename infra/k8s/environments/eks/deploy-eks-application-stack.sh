@@ -2,6 +2,11 @@
 
 # EKS APPLICATION DEPLOYMENT OVERVIEW
 #
+# this script deploys the application and operational add-ons into an existing eks cluster
+# it prepares postgres storage and runs migrations before starting workloads that depend on the schema
+# it verifies release images and waits for background processes as well as user-facing deployments
+# retained storage is not a backup, and the release images must contain the configured worker commands
+#
 # Keep this ordered list current whenever this script gains, removes, or reorders steps.
 # This script does not create the AWS foundation. Terraform must first provision the
 # EKS cluster, managed nodes, networking, ECR repositories, and required IAM access.
@@ -131,6 +136,8 @@ render_postgres_manifest() {
   helm template "$APPLICATION_RELEASE" "$APPLICATION_CHART" \
     --namespace "$NAMESPACE" \
     --values "$APPLICATION_VALUES" \
+    --show-only templates/postgres-storage-class.yaml \
+    --show-only templates/postgres-persistent-volume-claim.yaml \
     --show-only templates/postgres-deployment.yaml \
     --show-only templates/postgres-service.yaml >"$rendered_postgres_manifest"
 }
@@ -391,7 +398,7 @@ echo "applying rendered EKS Helm release"
 kubectl apply -f "$rendered_manifest"
 
 echo "waiting for application workloads"
-for deployment in postgres rabbitmq celery-worker frontend; do
+for deployment in postgres rabbitmq celery-worker frontend job-dispatcher outbox-publisher history-consumer; do
   kubectl rollout status "deployment/${deployment}" --namespace "$NAMESPACE" --timeout=300s
 done
 kubectl rollout status statefulset/kafka --namespace "$NAMESPACE" --timeout=600s
@@ -410,6 +417,10 @@ echo "verifying immutable application images"
 verify_workload_image "rollout" "api" "api" "${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-api:${RELEASE_IMAGE_TAG}"
 verify_workload_image "deployment" "celery-worker" "celery-worker" "${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-celery-worker:${RELEASE_IMAGE_TAG}"
 verify_workload_image "deployment" "frontend" "frontend" "${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-frontend:${RELEASE_IMAGE_TAG}"
+for deployment in job-dispatcher outbox-publisher history-consumer; do
+  verify_workload_image "deployment" "$deployment" "$deployment" \
+    "${RELEASE_ECR_REGISTRY}/distributed-job-processing-system-celery-worker:${RELEASE_IMAGE_TAG}"
+done
 
 echo "application stack deployed"
 echo "deployed immutable image tag: ${RELEASE_IMAGE_TAG}"
