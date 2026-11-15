@@ -1,3 +1,10 @@
+"""
+Load shared application settings from environment variables and the local environment file.
+Database, broker, and processing settings are reused by the API and background processes.
+Observability settings identify the deployment and service in structured application logs.
+Loading configuration does not start a collector, create traces, or contact a telemetry backend.
+"""
+
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,6 +15,7 @@ class ApplicationSettings(BaseSettings):
 
     app_env: str = "local"
     log_level: str = "INFO"
+    otel_service_name: str = "distributed-jobs"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/jobs"
