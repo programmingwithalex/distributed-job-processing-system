@@ -2,6 +2,7 @@
 Create the Celery application used both to publish execution commands and to run workers.
 Configure RabbitMQ as the broker, JSON message serialization, persistent delivery,
 and publisher confirmations so the dispatcher can distinguish accepted sends from failures.
+Preserve the shared JSON logging handlers when Celery initializes worker logging.
 Enable late task acknowledgement and worker-loss redelivery so interrupted work can
 return to the queue, while application locks and terminal-state checks handle duplicates.
 This configuration does not itself execute a job or store its result; task definitions
@@ -31,6 +32,7 @@ celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
+    worker_hijack_root_logger=False,
     broker_transport_options={"confirm_publish": True},
     broker_connection_timeout=5,
     timezone="UTC",

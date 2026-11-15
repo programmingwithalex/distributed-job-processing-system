@@ -51,6 +51,14 @@ docker compose up -d history_consumer
 
 The local broker retains Kafka records indefinitely to support this replay. Its `kafka_data` volume will grow until explicitly removed.
 
+## Structured Application Logs
+
+Application logs are single-line JSON records containing a UTC `timestamp`, `level`, `logger`, `service_name`, `environment`, `correlation_id`, `trace_id`, `span_id`, and `message`. Exceptions and stack traces are escaped inside the same record so collectors do not need multiline parsing for application logs.
+
+Set `OTEL_SERVICE_NAME` per process to identify the API, Celery worker, dispatcher, publisher, or consumer; it defaults to `distributed-jobs`. `APP_ENV` supplies the deployment environment. Existing `X-Request-ID` handling continues to provide request correlation independently of tracing.
+
+Trace and span IDs are captured from an active OpenTelemetry span when a log record is created. Without an active span, both fields are `null`; adding the API dependency does not create spans, propagate context through outboxes, or export telemetry. Instrumentation, Alloy collection, Loki/Tempo storage, and Grafana dashboards are separate from this log-formatting foundation and are not enabled by these settings.
+
 ## Run locally with uv
 
 Create a local environment file if you want to run the API or worker outside Docker:
